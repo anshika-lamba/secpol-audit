@@ -1,5 +1,5 @@
 # Mutant M3_2hop_escalate: Vulnerable 2-hop privilege escalation chain
-#   ivi_ui_t -> diag_helper_t -> can_hal_t (mem_phys, io, /dev/can_ctrl)
+#   ivi_ui_t -> diag_helper_t -> can_hal_t (mem_phys, io, /dev/name/local/can_ctrl)
 # Static prediction: CRITICAL ESCALATION_CHAIN (2-hop: ivi_ui_t -> diag_helper_t -> can_hal_t)
 # Runtime prediction: DIRECT_RESULT=DENIED, HOP1_SPAWN=OK, HOP2_TRANSITION=OK, HOP2_RESULT=GRANTED
 
@@ -15,16 +15,19 @@ allow_attach slogger2_t /dev/slog2;
 allow slogger2_t self:ability {
     nonroot
     pathspace
+    public_channel
 };
 
-allow_attach can_hal_t /dev/can_ctrl;
+# name_attach(NULL, "can_ctrl", 0) registers at /dev/name/local/can_ctrl
+allow_attach can_hal_t /dev/name/local/can_ctrl;
 allow can_hal_t self:ability {
     nonroot
     mem_phys:0xfe000000-0xfe010000
     io
     pathspace
+    public_channel
 };
-allow can_hal_t can_hal_t : channel connect;
+allow can_hal_t self : channel connect;
 
 allow planner_t can_hal_t : channel connect;
 

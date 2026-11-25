@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import html
 import json
+import math
 from typing import Any
 
 from secpol_audit import __version__
@@ -1062,3 +1064,259 @@ renderGraph();
 </body>
 </html>
 """
+
+
+def _svg_edge_curve(
+    sp: dict[str, float],
+    dp: dict[str, float],
+    curve_bias: float,
+) -> tuple[str, float, float]:
+    """Compute a quadratic Bezier path string and midpoint label coordinates for static SVG."""
+    if sp is dp:
+        x = sp["x"] + sp["w"]
+        y = sp["cy"]
+        return f"M {x:.1f} {y - 10:.1f} C {x + 40:.1f} {y - 34:.1f}, {x + 40:.1f} {y + 34:.1f}, {x:.1f} {y + 10:.1f}", x + 36, y
+
+    dx = dp["cx"] - sp["cx"]
+    dy = dp["cy"] - sp["cy"]
+    sx, sy = sp["cx"], sp["cy"]
+    ex, ey = dp["cx"], dp["cy"]
+
+    if abs(dy) >= abs(dx) * 0.45:
+        if dy > 0:
+            sy = sp["y"] + sp["h"]
+            ey = dp["y"]
+        else:
+            sy = sp["y"]
+            ey = dp["y"] + dp["h"]
+    else:
+        if dx > 0:
+            sx = sp["x"] + sp["w"]
+            ex = dp["x"]
+        else:
+            sx = sp["x"]
+            ex = dp["x"] + dp["w"]
+
+    mx = (sx + ex) / 2.0
+    my = (sy + ey) / 2.0
+    length = math.hypot(ex - sx, ey - sy) or 1.0
+    nx = -(ey - sy) / length
+    ny = (ex - sx) / length
+    offset = curve_bias * min(54.0, max(20.0, length * 0.16))
+    cx = mx + nx * offset
+    cy = my + ny * offset
+    # Quadratic Bezier midpoint at t=0.5
+    lx = 0.25 * sx + 0.5 * cx + 0.25 * ex
+    ly = 0.25 * sy + 0.5 * cy + 0.25 * ey
+    return f"M {sx:.1f} {sy:.1f} Q {cx:.1f} {cy:.1f}, {ex:.1f} {ey:.1f}", lx, ly
+
+
+def render_svg_preview(
+    path_result: PathAnalysisResult,
+    *,
+    findings: list[Finding] | None = None,
+    policy_path: str = "",
+    ifs_path: str | None = None,
+    include_review_edges: bool = True,
+) -> str:
+    """Render a standalone, crisp static SVG preview of the trust-zone escalation graph."""
+    all_findings = findings if findings is not None else path_result.findings
+    ifs_errors = [f for f in all_findings if f.rule_id in IFS_RULE_IDS]
+    layout = _compute_layout(path_result)
+
+    header_h = 74
+    footer_h = 44
+    width = int(layout["width"])
+    height = int(layout["height"]) + header_h + footer_h
+
+    # Map escalation chain hop labels and highlighted node/edge sets
+    chain_nodes: set[str] = set()
+    chain_hop_labels: dict[tuple[str, str], str] = {}
+    for ep in path_result.escalation_paths:
+        chain_nodes.update(ep.nodes)
+        for idx, edge in enumerate(ep.edges, start=1):
+            pair = (edge.src, edge.dst)
+            if pair not in chain_hop_labels:
+                chain_hop_labels[pair] = f"Hop {idx}: {edge.mechanism}"
+
+    # Shift layout coordinates down by header_h
+    positions: dict[str, dict[str, float]] = {}
+    for name, pos in layout["positions"].items():
+        positions[name] = {
+            "x": pos["x"],
+            "y": pos["y"] + header_h,
+            "w": pos["w"],
+            "h": pos["h"],
+            "cx": pos["cx"],
+            "cy": pos["cy"] + header_h,
+        }
+
+    parts: list[str] = [
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">',
+        "<defs>",
+        '  <linearGradient id="bg-grad" x1="0%" y1="0%" x2="100%" y2="100%">',
+        '    <stop offset="0%" stop-color="#0f172a" />',
+        '    <stop offset="100%" stop-color="#0b1120" />',
+        "  </linearGradient>",
+        '  <filter id="crimson-glow" x="-25%" y="-25%" width="150%" height="150%">',
+        '    <feGaussianBlur stdDeviation="3" result="blur" />',
+        '    <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>',
+        "  </filter>",
+        '  <marker id="arrow-esc" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7.5" markerHeight="7.5" orient="auto-start-reverse">',
+        '    <path d="M 0 1.2 L 10 5 L 0 8.8 z" fill="#ef4444" />',
+        "  </marker>",
+        '  <marker id="arrow-rev" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">',
+        '    <path d="M 0 1.5 L 10 5 L 0 8.5 z" fill="#64748b" />',
+        "  </marker>",
+        "</defs>",
+        # Card background
+        f'<rect x="0.5" y="0.5" width="{width - 1}" height="{height - 1}" rx="12" fill="url(#bg-grad)" stroke="#334155" stroke-width="1" />',
+        # Header banner
+        f'<rect x="1" y="1" width="{width - 2}" height="{header_h - 2}" rx="11" fill="#0f172a" />',
+        f'<line x1="1" y1="{header_h}" x2="{width - 1}" y2="{header_h}" stroke="#1e293b" stroke-width="1" />',
+        '<text x="24" y="30" fill="#f8fafc" font-size="16" font-weight="700" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">secpol-audit · QNX Neutrino 8.0 Privilege-Escalation Graph</text>',
+        f'<text x="24" y="52" fill="#94a3b8" font-size="11.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">{html.escape(policy_path or "policy.secpol")}{("  +  " + html.escape(ifs_path)) if ifs_path else ""}</text>',
+    ]
+
+    # Top-right escalation banner pill
+    if path_result.escalation_paths:
+        hero = path_result.escalation_paths[0].chain_str()
+        pill_text = f"CRITICAL {path_result.escalation_paths[0].hops}-HOP: {hero}"
+        pill_w = min(width - 420, max(280, len(pill_text) * 7 + 26))
+        pill_x = width - pill_w - 20
+        parts.append(
+            f'<rect x="{pill_x}" y="18" width="{pill_w}" height="34" rx="7" fill="#3a121b" stroke="#ef4444" stroke-width="1.4" />'
+        )
+        parts.append(
+            f'<text x="{pill_x + pill_w / 2:.1f}" y="39" text-anchor="middle" fill="#fecaca" font-size="11.5" font-weight="700" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">{html.escape(pill_text)}</text>'
+        )
+    else:
+        pill_w = 220
+        pill_x = width - pill_w - 20
+        parts.append(
+            f'<rect x="{pill_x}" y="18" width="{pill_w}" height="34" rx="7" fill="#0f291e" stroke="#22c55e" stroke-width="1.2" />'
+        )
+        parts.append(
+            f'<text x="{pill_x + pill_w / 2:.1f}" y="39" text-anchor="middle" fill="#86efac" font-size="11.5" font-weight="700" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">0 ESCALATION CHAINS (PASS)</text>'
+        )
+
+    # Trust zone bands
+    for b in layout["bands"]:
+        by = b["y"] + header_h
+        parts.append(
+            f'<rect x="{b["x"]}" y="{by}" width="{b["width"]}" height="{b["height"]}" rx="10" '
+            f'fill="{b["bg"]}" stroke="{b["color"]}" stroke-opacity="0.38" stroke-width="1" />'
+        )
+        parts.append(
+            f'<text x="{b["x"] + 14}" y="{by + 19}" fill="{b["color"]}" font-size="11.5" font-weight="700" '
+            f'font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">'
+            f'{html.escape(b["zone"].upper())} — {html.escape(b["desc"])} ({b["count"]})</text>'
+        )
+
+    # Layer 1: Subtle review-only edges (channel_connect / allow_link)
+    if include_review_edges:
+        seen_rev_pairs: set[tuple[str, str]] = set()
+        for e in path_result.review_edges:
+            if e.src == e.dst or (e.src, e.dst) in seen_rev_pairs:
+                continue
+            seen_rev_pairs.add((e.src, e.dst))
+            sp = positions.get(e.src)
+            dp = positions.get(e.dst)
+            if not sp or not dp:
+                continue
+            d, _, _ = _svg_edge_curve(sp, dp, 0.55)
+            parts.append(
+                f'<path d="{d}" fill="none" stroke="#64748b" stroke-width="1.15" stroke-opacity="0.42" '
+                f'stroke-dasharray="4,5" marker-end="url(#arrow-rev)" />'
+            )
+
+    # Layer 2: Nodes
+    for name, meta in sorted(path_result.nodes.items()):
+        pos = positions.get(name)
+        if not pos:
+            continue
+        is_sink = bool(meta.get("is_sink"))
+        in_chain = name in chain_nodes
+        stroke = "#ef4444" if in_chain else ("#f97316" if is_sink else "#475569")
+        fill = "#24111c" if in_chain else "#111c33"
+        sw = 2.4 if in_chain else 1.3
+        filt = ' filter="url(#crimson-glow)"' if in_chain else ""
+        parts.append(
+            f'<rect x="{pos["x"]}" y="{pos["y"]}" width="{pos["w"]}" height="{pos["h"]}" rx="8" '
+            f'fill="{fill}" stroke="{stroke}" stroke-width="{sw}"{filt} />'
+        )
+        parts.append(
+            f'<text x="{pos["cx"]}" y="{pos["y"] + 23}" text-anchor="middle" fill="#f8fafc" '
+            f'font-size="12.5" font-weight="700" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">'
+            f"{html.escape(name)}</text>"
+        )
+        priv_count = sum(1 for a in meta.get("abilities", []) if a.get("privileged"))
+        if is_sink:
+            sub_txt = f"SINK · {priv_count} priv abil"
+            sub_fill = "#fca5a5"
+        else:
+            sub_txt = f"{len(meta.get('abilities', []))} abil · {len(meta.get('attaches', []))} attach"
+            sub_fill = "#94a3b8"
+        parts.append(
+            f'<text x="{pos["cx"]}" y="{pos["y"] + 41}" text-anchor="middle" fill="{sub_fill}" '
+            f'font-size="10" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">'
+            f"{html.escape(sub_txt)}</text>"
+        )
+
+    # Layer 3: Prominent crimson ESCALATION edges on top with hop badges
+    seen_esc_pairs: set[tuple[str, str]] = set()
+    for e in path_result.escalation_edges:
+        if e.src == e.dst or (e.src, e.dst) in seen_esc_pairs:
+            continue
+        seen_esc_pairs.add((e.src, e.dst))
+        sp = positions.get(e.src)
+        dp = positions.get(e.dst)
+        if not sp or not dp:
+            continue
+        d, lx, ly = _svg_edge_curve(sp, dp, -1.15)
+        in_chain = (e.src, e.dst) in chain_hop_labels
+        sw = 3.2 if in_chain else 2.2
+        filt = ' filter="url(#crimson-glow)"' if in_chain else ""
+        parts.append(
+            f'<path d="{d}" fill="none" stroke="#ef4444" stroke-width="{sw}" '
+            f'marker-end="url(#arrow-esc)"{filt} />'
+        )
+        if in_chain:
+            lbl = chain_hop_labels[(e.src, e.dst)]
+            bw = len(lbl) * 6.4 + 14
+            parts.append(
+                f'<rect x="{lx - bw / 2:.1f}" y="{ly - 10:.1f}" width="{bw:.1f}" height="20" rx="4" '
+                f'fill="#3a121b" stroke="#ef4444" stroke-width="1" />'
+            )
+            parts.append(
+                f'<text x="{lx:.1f}" y="{ly + 3.5:.1f}" text-anchor="middle" fill="#fecaca" '
+                f'font-size="10" font-weight="700" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">'
+                f"{html.escape(lbl)}</text>"
+            )
+
+    # Footer legend bar
+    fy = height - footer_h
+    parts.append(f'<line x1="1" y1="{fy}" x2="{width - 1}" y2="{fy}" stroke="#1e293b" stroke-width="1" />')
+    parts.append(f'<line x1="24" y1="{fy + 22}" x2="54" y2="{fy + 22}" stroke="#ef4444" stroke-width="3" />')
+    parts.append(
+        f'<text x="62" y="{fy + 26}" fill="#e2e8f0" font-size="11" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">'
+        "ESCALATION (settypeid / derive_type / default_spawn_type)</text>"
+    )
+    parts.append(
+        f'<line x1="468" y1="{fy + 22}" x2="498" y2="{fy + 22}" stroke="#64748b" stroke-width="2" stroke-dasharray="4,4" />'
+    )
+    parts.append(
+        f'<text x="506" y="{fy + 26}" fill="#94a3b8" font-size="11" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">'
+        "REVIEW-ONLY (channel_connect / allow_link)</text>"
+    )
+    stats_text = (
+        f"{len(path_result.nodes)} Types · {len(path_result.escalation_paths)} Escalation Chain"
+        f"{'' if len(path_result.escalation_paths) == 1 else 's'} · {len(ifs_errors)} IFS Errors"
+    )
+    parts.append(
+        f'<text x="{width - 20}" y="{fy + 26}" text-anchor="end" fill="#cbd5e1" font-size="11" font-weight="700" '
+        f'font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">{html.escape(stats_text)}</text>'
+    )
+    parts.append("</svg>\n")
+    return "\n".join(parts)
+

@@ -197,3 +197,87 @@ def test_fail_closed_missing_file() -> None:
     with pytest.raises(ParseDiagnostic) as excinfo:
         parse_secpol_file("/nonexistent/path/missing.secpol")
     assert excinfo.value.code == "PARSE_ERROR"
+
+
+def test_include_directive_resolves_relative_and_nested(tmp_path) -> None:
+    sub = tmp_path / "inc"
+    sub.mkdir()
+    leaf = sub / "leaf.secpol"
+    leaf.write_text(
+        """
+        type can_hal_t;
+        allow_attach can_hal_t /dev/name/local/can_ctrl;
+        allow can_hal_t self:ability {
+            nonroot
+            public_channel
+            pathspace
+            procmgr_ability
+        };
+        """,
+        encoding="utf-8",
+    )
+    mid = tmp_path / "common.secpol"
+    mid.write_text('include "inc/leaf.secpol";\ntype diag_helper_t;\n', encoding="utf-8")
+    root = tmp_path / "main.secpol"
+    root.write_text(
+        """
+        include "common.secpol";
+        allow diag_helper_t can_hal_t : channel connect;
+        """,
+        encoding="utf-8",
+    )
+
+    ir = parse_secpol_file(root)
+    assert set(ir.types.keys()) == {"can_hal_t", "diag_helper_t"}
+    assert ir.types["can_hal_t"].span.file == str(leaf)
+    ab_names = [spec.name for rule in ir.ability_rules for spec in rule.abilities]
+    assert {"public_channel", "pathspace", "procmgr_ability"}.issubset(set(ab_names))
+
+
+def test_include_circular_fails_closed(tmp_path) -> None:
+    a = tmp_path / "a.secpol"
+    b = tmp_path / "b.secpol"
+    a.write_text('include "b.secpol";\n', encoding="utf-8")
+    b.write_text('include "a.secpol";\n', encoding="utf-8")
+
+    with pytest.raises(ParseDiagnostic) as excinfo:
+        parse_secpol_file(a)
+    assert excinfo.value.code == "PARSE_ERROR"
+    assert "Circular include" in excinfo.value.message
+
+    self_inc = tmp_path / "self.secpol"
+    self_inc.write_text('include "self.secpol";\n', encoding="utf-8")
+    with pytest.raises(ParseDiagnostic) as exc2:
+        parse_secpol_file(self_inc)
+    assert exc2.value.code == "PARSE_ERROR"
+    assert "Circular include" in exc2.value.message
+
+
+def test_include_missing_file_fails_closed(tmp_path) -> None:
+    root = tmp_path / "main.secpol"
+    root.write_text('include "does_not_exist.secpol";\n', encoding="utf-8")
+    with pytest.raises(ParseDiagnostic) as excinfo:
+        parse_secpol_file(root)
+    assert excinfo.value.code == "PARSE_ERROR"
+    assert "not found" in excinfo.value.message
+
+
+def test_qnx_sdp_common_abilities_public_channel_pathspace_procmgr() -> None:
+    src = """
+    type srv_t;
+    allow srv_t self:ability {
+        nonroot public_channel
+        noinherit pathspace
+        procmgr_ability
+        procmgr_ability:custom_cap
+    };
+    """
+    ir = parse_secpol_text(src, "sdp_abilities.secpol")
+    specs = ir.ability_rules[0].abilities
+    assert [(s.name, s.modifiers, s.args) for s in specs] == [
+        ("public_channel", ("nonroot",), ()),
+        ("pathspace", ("noinherit",), ()),
+        ("procmgr_ability", (), ()),
+        ("procmgr_ability", (), ("custom_cap",)),
+    ]
+

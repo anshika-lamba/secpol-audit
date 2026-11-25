@@ -12,7 +12,7 @@ from secpol_audit import __version__
 from secpol_audit.checks import run_all_checks
 from secpol_audit.compile_wrap import CompileResult, run_secpolcompile
 from secpol_audit.diff import PolicyDiffResult, diff_policies
-from secpol_audit.graph_html import render_html_report
+from secpol_audit.graph_html import render_html_report, render_svg_preview
 from secpol_audit.ir import Finding, ParseDiagnostic
 from secpol_audit.parser_ifs import parse_ifs_file
 from secpol_audit.parser_secpol import parse_secpol_file
@@ -185,12 +185,24 @@ def _cmd_paths(args: argparse.Namespace) -> int:
         html_out.parent.mkdir(parents=True, exist_ok=True)
         html_out.write_text(html_doc, encoding="utf-8")
 
+    if args.svg:
+        svg_doc = render_svg_preview(
+            path_result,
+            findings=combined_findings,
+            policy_path=str(args.secpol),
+            ifs_path=str(args.ifs) if args.ifs else None,
+        )
+        svg_out = Path(args.svg)
+        svg_out.parent.mkdir(parents=True, exist_ok=True)
+        svg_out.write_text(svg_doc, encoding="utf-8")
+
     if args.format == "json":
         payload = {
             "policy": str(args.secpol),
             "ifs": str(args.ifs) if args.ifs else None,
             "secpolcompile": compile_res.to_dict(),
             "html_report": str(args.html) if args.html else None,
+            "svg_report": str(args.svg) if args.svg else None,
             "escalation_edges": [e.to_dict() for e in path_result.escalation_edges],
             "review_edges": [e.to_dict() for e in path_result.review_edges],
             "escalation_paths": [p.to_dict() for p in path_result.escalation_paths],
@@ -211,6 +223,8 @@ def _cmd_paths(args: argparse.Namespace) -> int:
             lines.append("Escalation Chains: 0 (clean)")
         if args.html:
             lines.append(f"Interactive HTML report written to: {args.html}")
+        if args.svg:
+            lines.append(f"Static SVG preview written to: {args.svg}")
         out = "\n".join(lines) + "\n"
 
     _write_output(out, args.output)
@@ -294,6 +308,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_paths.add_argument("--to", dest="to_type", help="Filter chains ending at a specific sink type")
     p_paths.add_argument("--max-depth", type=int, default=6, help="Maximum hop depth (default: 6)")
     p_paths.add_argument("--html", help="Write self-contained interactive HTML/SVG graph report to path")
+    p_paths.add_argument("--svg", help="Write static standalone SVG preview graph to path")
     p_paths.add_argument("--format", choices=("text", "json"), default="text", help="Console output format")
     p_paths.add_argument("--output", "-o", help="Write console output to file instead of stdout")
     p_paths.add_argument("--secpolcompile-bin", help="Explicit path to QNX secpolcompile binary")

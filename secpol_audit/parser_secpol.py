@@ -191,10 +191,20 @@ def tokenize_secpol(text: str, source_path: str) -> tuple[list[Token], list[str]
 class SecpolParser:
     """Recursive-descent fail-closed parser for QNX 8.0 security policies."""
 
-    def __init__(self, tokens: list[Token], lines: list[str], source_path: str) -> None:
+    def __init__(
+        self,
+        tokens: list[Token],
+        lines: list[str],
+        source_path: str,
+        *,
+        base_dir: Path | None = None,
+        include_stack: tuple[Path, ...] = (),
+    ) -> None:
         self.tokens = tokens
         self.lines = lines
         self.source_path = source_path
+        self.base_dir = base_dir
+        self.include_stack = include_stack
         self.pos = 0
 
     def peek(self, offset: int = 0) -> Token:
@@ -251,8 +261,9 @@ class SecpolParser:
             )
         return tok.value
 
-    def parse(self) -> PolicyIR:
-        ir = PolicyIR(source_path=self.source_path)
+    def parse(self, ir: PolicyIR | None = None) -> PolicyIR:
+        if ir is None:
+            ir = PolicyIR(source_path=self.source_path)
 
         while self.peek().kind != "EOF":
             tok = self.peek()
@@ -264,7 +275,9 @@ class SecpolParser:
                 )
 
             kw = tok.value
-            if kw == "attribute":
+            if kw == "include":
+                self._parse_include(ir)
+            elif kw == "attribute":
                 self._parse_attribute(ir)
             elif kw == "type":
                 self._parse_type(ir)
@@ -288,6 +301,62 @@ class SecpolParser:
                 )
 
         return ir
+
+    def _parse_include(self, ir: PolicyIR) -> None:
+        start = self.advance()  # 'include'
+        path_tok = self.peek()
+        if path_tok.kind != "STRING":
+            raise self.error(
+                "PARSE_ERROR",
+                "Expected quoted file path after 'include' (e.g., include \"common.secpol\";)",
+                path_tok,
+            )
+        self.advance()
+        end = self.expect("SEMI", "';'")
+
+        inc_raw = path_tok.value.strip()
+        if not inc_raw:
+            raise self.error("PARSE_ERROR", "Empty path in 'include' directive", path_tok)
+
+        inc_path = Path(inc_raw)
+        if not inc_path.is_absolute():
+            anchor = self.base_dir if self.base_dir is not None else Path.cwd()
+            inc_path = anchor / inc_path
+
+        resolved = inc_path.resolve()
+        if resolved in self.include_stack:
+            chain = " -> ".join(str(p) for p in (*self.include_stack, resolved))
+            raise ParseDiagnostic(
+                "PARSE_ERROR",
+                f"Circular include detected: {chain}",
+                self.span_of(start, end),
+            )
+
+        if not inc_path.is_file():
+            raise ParseDiagnostic(
+                "PARSE_ERROR",
+                f"Included policy file not found: '{inc_raw}' (resolved to '{inc_path}')",
+                self.span_of(start, end),
+            )
+
+        try:
+            inc_text = inc_path.read_text(encoding="utf-8")
+        except OSError as exc:
+            raise ParseDiagnostic(
+                "PARSE_ERROR",
+                f"Unable to read included policy file '{inc_path}': {exc}",
+                self.span_of(start, end),
+            ) from exc
+
+        inc_tokens, inc_lines = tokenize_secpol(inc_text, str(inc_path))
+        child = SecpolParser(
+            inc_tokens,
+            inc_lines,
+            str(inc_path),
+            base_dir=resolved.parent,
+            include_stack=self.include_stack + (resolved,),
+        )
+        child.parse(ir)
 
     def _parse_attribute(self, ir: PolicyIR) -> None:
         start = self.advance()  # 'attribute'
@@ -750,10 +819,29 @@ class SecpolParser:
         )
 
 
-def parse_secpol_text(text: str, source_path: str = "<memory>") -> PolicyIR:
+def parse_secpol_text(
+    text: str,
+    source_path: str = "<memory>",
+    *,
+    base_dir: Path | None = None,
+) -> PolicyIR:
     """Parse QNX 8.0 `.secpol` policy text into `PolicyIR`."""
     tokens, lines = tokenize_secpol(text, source_path)
-    parser = SecpolParser(tokens, lines, source_path)
+    resolved_stack: tuple[Path, ...] = ()
+    effective_base = base_dir
+    if source_path != "<memory>":
+        p = Path(source_path)
+        if effective_base is None:
+            effective_base = p.parent
+        if p.exists():
+            resolved_stack = (p.resolve(),)
+    parser = SecpolParser(
+        tokens,
+        lines,
+        source_path,
+        base_dir=effective_base,
+        include_stack=resolved_stack,
+    )
     return parser.parse()
 
 
@@ -768,4 +856,13 @@ def parse_secpol_file(path: str | Path) -> PolicyIR:
             f"Unable to read policy file: {exc}",
             SourceSpan(file=str(p), line=1, col=1),
         ) from exc
-    return parse_secpol_text(text, str(p))
+    resolved = p.resolve()
+    tokens, lines = tokenize_secpol(text, str(p))
+    parser = SecpolParser(
+        tokens,
+        lines,
+        str(p),
+        base_dir=resolved.parent,
+        include_stack=(resolved,),
+    )
+    return parser.parse()

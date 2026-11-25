@@ -101,3 +101,54 @@ def test_harness_observe_serial_fixtures() -> None:
 
     obs_m2 = observe_serial_file(FIXTURES / "M2_untyped_server.log")
     assert any(p.name == "can_server" and p.secpol_type is None for p in obs_m2.pidin_processes)
+
+
+def test_parse_pidin_flexible_headers_reversed_order_overflow_and_paths() -> None:
+    # Header with "security type" multi-word label, overflowed long type name, and bare/relative paths
+    sample_sec = """
+      pid  security type           name
+        1                          procnto-smp-instr
+     4098  very_long_qnx_custom_security_type_t /proc/boot/can_server -v
+     4099  (none)                  proc/boot/ota_agent
+     4100  0                       can_server
+     4101                          telemetry_svc --daemon
+    """
+    procs = parse_pidin_text(sample_sec, "sec_hdr.log")
+    assert [(p.pid, p.secpol_type, p.name) for p in procs] == [
+        (1, None, "procnto-smp-instr"),
+        (4098, "very_long_qnx_custom_security_type_t", "can_server"),
+        (4099, None, "ota_agent"),
+        (4100, None, "can_server"),
+        (4101, None, "telemetry_svc"),
+    ]
+
+    # Reversed column order: `pid name secpol` (e.g. `pidin -f an_`)
+    sample_rev = """
+      pid name                         secpol
+        1 procnto-smp-instr
+     5001 /proc/boot/can_server        can_hal_t
+     5002 can_server                   -
+     5003 /proc/boot/ota_agent         (none)
+     5004 /proc/boot/diag_helper       diag_helper_t
+    """
+    procs_rev = parse_pidin_text(sample_rev, "rev_hdr.log")
+    assert [(p.pid, p.secpol_type, p.name) for p in procs_rev] == [
+        (1, None, "procnto-smp-instr"),
+        (5001, "can_hal_t", "can_server"),
+        (5002, None, "can_server"),
+        (5003, None, "ota_agent"),
+        (5004, "diag_helper_t", "diag_helper"),
+    ]
+
+    # Extra leading column (`pid tid secpol name`)
+    sample_tid = """
+      pid   tid secpol          name
+     6001     1 can_hal_t       /proc/boot/can_server
+     6002     1 -               ./ota_agent
+    """
+    procs_tid = parse_pidin_text(sample_tid, "tid_hdr.log")
+    assert [(p.pid, p.secpol_type, p.name) for p in procs_tid] == [
+        (6001, "can_hal_t", "can_server"),
+        (6002, None, "ota_agent"),
+    ]
+
