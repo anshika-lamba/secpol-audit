@@ -10,9 +10,11 @@ MKIFS         ?= mkifs
 
 BUILD_DIR     := build
 BINARIES      := $(BUILD_DIR)/can_server $(BUILD_DIR)/diag_helper $(BUILD_DIR)/ivi_exploit
+SENTRY_BINS   := $(BINARIES) $(BUILD_DIR)/secpol_sentry
 MUTANTS       := M0_clean M1_no_connect M2_untyped_server M3_2hop_escalate M3_fixed
+SENTRY_MUTANTS := M0_sentry_clean M3_sentry_escalate
 
-.PHONY: all binaries images clean check-sdp
+.PHONY: all binaries images sentry-binaries sentry-images clean check-sdp
 
 all: binaries images
 
@@ -35,6 +37,11 @@ $(BUILD_DIR)/diag_helper: diag_helper.c | $(BUILD_DIR)
 $(BUILD_DIR)/ivi_exploit: ivi_exploit.c | $(BUILD_DIR)
 	$(CC) $(TARGET_FLAGS) $(CFLAGS) -o $@ $< $(LDFLAGS)
 
+$(BUILD_DIR)/secpol_sentry: secpol_sentry.c | $(BUILD_DIR)
+	$(CC) $(TARGET_FLAGS) $(CFLAGS) -o $@ $< -lsecpolev $(LDFLAGS)
+
+sentry-binaries: check-sdp $(SENTRY_BINS)
+
 # Compile mutant policies
 $(BUILD_DIR)/M0_clean.secpol.bin: mutants/M0_clean.secpol | $(BUILD_DIR)
 	$(SECPOLCOMPILE) -o $@ $<
@@ -46,6 +53,12 @@ $(BUILD_DIR)/M3_2hop_escalate.secpol.bin: mutants/M3_2hop_escalate.secpol | $(BU
 	$(SECPOLCOMPILE) -o $@ $<
 
 $(BUILD_DIR)/M3_fixed.secpol.bin: mutants/M3_fixed.secpol | $(BUILD_DIR)
+	$(SECPOLCOMPILE) -o $@ $<
+
+$(BUILD_DIR)/M0_sentry_clean.secpol.bin: mutants/M0_sentry_clean.secpol | $(BUILD_DIR)
+	$(SECPOLCOMPILE) -o $@ $<
+
+$(BUILD_DIR)/M3_sentry_escalate.secpol.bin: mutants/M3_sentry_escalate.secpol | $(BUILD_DIR)
 	$(SECPOLCOMPILE) -o $@ $<
 
 # Generate parameterized IFS images for QEMU x86_64 TCG
@@ -77,7 +90,19 @@ $(BUILD_DIR)/M3_fixed.ifs: build.ifs.in $(BUILD_DIR)/M3_fixed.secpol.bin $(BINAR
 	    -e 's|@MUTANT_NAME@|M3_fixed|g' $< > $(BUILD_DIR)/M3_fixed.build
 	$(MKIFS) $(BUILD_DIR)/M3_fixed.build $@
 
+$(BUILD_DIR)/M0_sentry_clean.ifs: build_sentry.ifs.in $(BUILD_DIR)/M0_sentry_clean.secpol.bin $(SENTRY_BINS)
+	sed -e 's|@SECPOL_BIN@|$(BUILD_DIR)/M0_sentry_clean.secpol.bin|g' \
+	    -e 's|@MUTANT_NAME@|M0_sentry_clean|g' $< > $(BUILD_DIR)/M0_sentry_clean.build
+	$(MKIFS) $(BUILD_DIR)/M0_sentry_clean.build $@
+
+$(BUILD_DIR)/M3_sentry_escalate.ifs: build_sentry.ifs.in $(BUILD_DIR)/M3_sentry_escalate.secpol.bin $(SENTRY_BINS)
+	sed -e 's|@SECPOL_BIN@|$(BUILD_DIR)/M3_sentry_escalate.secpol.bin|g' \
+	    -e 's|@MUTANT_NAME@|M3_sentry_escalate|g' $< > $(BUILD_DIR)/M3_sentry_escalate.build
+	$(MKIFS) $(BUILD_DIR)/M3_sentry_escalate.build $@
+
 images: check-sdp $(addprefix $(BUILD_DIR)/,$(addsuffix .ifs,$(MUTANTS)))
+
+sentry-images: check-sdp $(addprefix $(BUILD_DIR)/,$(addsuffix .ifs,$(SENTRY_MUTANTS)))
 
 clean:
 	rm -rf $(BUILD_DIR)

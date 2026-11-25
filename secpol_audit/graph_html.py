@@ -117,6 +117,7 @@ def render_html_report(
     policy_path: str = "",
     ifs_path: str | None = None,
     compile_result: CompileResult | None = None,
+    verified_edges: set[tuple[str, str]] | None = None,
 ) -> str:
     """Render a single-file, zero-CDN interactive HTML/SVG privilege-escalation workbench."""
     all_findings = findings if findings is not None else path_result.findings
@@ -127,6 +128,7 @@ def render_html_report(
         if compile_result is not None
         else "secpolcompile not executed (skipped)"
     )
+    verified_set: set[tuple[str, str]] = set(verified_edges) if verified_edges else set()
 
     layout = _compute_layout(path_result)
 
@@ -156,6 +158,7 @@ def render_html_report(
                 "raw": e.raw,
                 "via_attribute": e.via_attribute,
                 "in_chain": (e.src, e.dst) in chain_edge_pairs,
+                "trace_verified": (e.src, e.dst) in verified_set,
                 "chains": chains_using,
             }
         )
@@ -172,11 +175,17 @@ def render_html_report(
                 "raw": e.raw,
                 "via_attribute": e.via_attribute,
                 "in_chain": False,
+                "trace_verified": False,
                 "chains": [],
             }
         )
 
-    chains_payload = [ep.to_dict() for ep in path_result.escalation_paths]
+    chains_payload = []
+    for ep in path_result.escalation_paths:
+        ep_dict = ep.to_dict()
+        ep_pairs = [(ep.nodes[i], ep.nodes[i + 1]) for i in range(len(ep.nodes) - 1)]
+        ep_dict["trace_verified"] = bool(ep_pairs) and all(p in verified_set for p in ep_pairs)
+        chains_payload.append(ep_dict)
     findings_payload = [f.to_dict() for f in all_findings]
 
     graph_data = {
@@ -187,6 +196,7 @@ def render_html_report(
         "edges": edges_payload,
         "chains": chains_payload,
         "findings": findings_payload,
+        "verified_edge_count": len(verified_set),
         "compile": {
             "status": compile_status,
             "message": compile_msg,
@@ -197,17 +207,27 @@ def render_html_report(
     type_count = len(path_result.nodes)
     ifs_err_count = len(ifs_errors)
     total_findings = len(all_findings)
+    verified_count = len(verified_set)
 
     # Pre-render static HTML chain list so plain HTML inspection also sees exact chains
     if path_result.escalation_paths:
-        chain_items_html = "\n".join(
-            f'<div class="chain-card" data-chain-idx="{idx}" onclick="selectChain({idx})">'
-            f'<div class="chain-head"><span class="badge badge-crit">{ep.hops}-HOP ESCALATION</span>'
-            f'<span class="chain-sink">Gains: {html.escape(", ".join(ep.sink_reasons))}</span></div>'
-            f'<div class="chain-path">{html.escape(ep.chain_str())}</div>'
-            f"</div>"
-            for idx, ep in enumerate(path_result.escalation_paths)
-        )
+        chain_cards: list[str] = []
+        for idx, ep in enumerate(path_result.escalation_paths):
+            ep_pairs = [(ep.nodes[i], ep.nodes[i + 1]) for i in range(len(ep.nodes) - 1)]
+            is_trace_verified = bool(ep_pairs) and all(p in verified_set for p in ep_pairs)
+            tv_badge = (
+                ' <span class="badge badge-trace">KERNEL TRACE VERIFIED</span>'
+                if is_trace_verified
+                else ""
+            )
+            chain_cards.append(
+                f'<div class="chain-card" data-chain-idx="{idx}" onclick="selectChain({idx})">'
+                f'<div class="chain-head"><span><span class="badge badge-crit">{ep.hops}-HOP ESCALATION</span>{tv_badge}</span>'
+                f'<span class="chain-sink">Gains: {html.escape(", ".join(ep.sink_reasons))}</span></div>'
+                f'<div class="chain-path">{html.escape(ep.chain_str())}</div>'
+                f"</div>"
+            )
+        chain_items_html = "\n".join(chain_cards)
     else:
         chain_items_html = '<div class="empty-note">No transitive privilege escalation chains detected.</div>'
 
@@ -549,6 +569,7 @@ def render_html_report(
     font-family: var(--mono);
   }}
   .badge-crit {{ background: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.45); }}
+  .badge-trace {{ background: rgba(245, 158, 11, 0.24); color: #fde047; border: 1px solid rgba(250, 204, 21, 0.65); }}
   .chain-sink {{ font-size: 11px; font-family: var(--mono); color: #fca5a5; }}
   .chain-path {{
     font-family: var(--mono);
@@ -621,6 +642,7 @@ def render_html_report(
     <div class="metric-label">secpolcompile Status</div>
     <div><span class="status-pill {compile_badge_class}" title="{html.escape(compile_msg)}">{html.escape(compile_status)}</span></div>
   </div>
+  {f'<div class="metric-card"><div class="metric-label">Kernel Trace Verified Edges</div><div class="metric-value metric-danger">{verified_count}</div></div>' if verified_count > 0 else ""}
 </section>
 
 <section class="toolbar">
@@ -815,11 +837,27 @@ function renderGraph() {{
     const visiblePath = svgEl("path", pathAttrs);
     const hitPath = svgEl("path", {{ d, class: "edge-hit" }});
     const title = svgEl("title");
-    title.textContent = `${{e.src}} -> ${{e.dst}} [${{e.kind === "REVIEW_ONLY" ? "review-only: " + e.mechanism : "ESCALATION: " + e.mechanism}}] (${{e.location}})`;
+    const tvTag = e.trace_verified ? " [KERNEL TRACE VERIFIED]" : "";
+    title.textContent = `${{e.src}} -> ${{e.dst}} [${{e.kind === "REVIEW_ONLY" ? "review-only: " + e.mechanism : "ESCALATION: " + e.mechanism}}]${{tvTag}} (${{e.location}})`;
 
     g.appendChild(visiblePath);
     g.appendChild(hitPath);
     g.appendChild(title);
+    if (e.trace_verified) {{
+      const mx = (sp.cx + dp.cx) / 2;
+      const my = (sp.cy + dp.cy) / 2;
+      const pill = svgEl("rect", {{
+        x: mx - 76, y: my - 10, width: 152, height: 18, rx: 4,
+        fill: "#422006", stroke: "#facc15", "stroke-width": 1.1,
+      }});
+      const ptxt = svgEl("text", {{
+        x: mx, y: my + 3, "text-anchor": "middle",
+        fill: "#fde047", "font-size": 9.5, "font-weight": 700, "font-family": "var(--mono)",
+      }});
+      ptxt.textContent = "KERNEL TRACE VERIFIED";
+      g.appendChild(pill);
+      g.appendChild(ptxt);
+    }}
     g.addEventListener("click", (ev) => {{
       ev.stopPropagation();
       inspectEdge(e);
@@ -942,7 +980,7 @@ function inspectEdge(edge) {{
   if (eg) eg.classList.add("selected");
 
   const badge = edge.kind === "ESCALATION"
-    ? `<span class="chip chip-priv">ESCALATION (${{escHtml(edge.mechanism)}})</span>`
+    ? `<span class="chip chip-priv">ESCALATION (${{escHtml(edge.mechanism)}})</span>${{edge.trace_verified ? '<span class="badge badge-trace">KERNEL TRACE VERIFIED</span>' : ""}}`
     : `<span class="chip chip-review">REVIEW-ONLY (${{escHtml(edge.mechanism)}})</span>`;
   const chains = (edge.chains || []).length
     ? edge.chains.map((c) => `<div class="code-box" style="border-color:#ef4444;margin-bottom:6px;">${{escHtml(c)}}</div>`).join("")
@@ -1118,10 +1156,12 @@ def render_svg_preview(
     policy_path: str = "",
     ifs_path: str | None = None,
     include_review_edges: bool = True,
+    verified_edges: set[tuple[str, str]] | None = None,
 ) -> str:
     """Render a standalone, crisp static SVG preview of the trust-zone escalation graph."""
     all_findings = findings if findings is not None else path_result.findings
     ifs_errors = [f for f in all_findings if f.rule_id in IFS_RULE_IDS]
+    verified_set: set[tuple[str, str]] = set(verified_edges) if verified_edges else set()
     layout = _compute_layout(path_result)
 
     header_h = 74
@@ -1181,11 +1221,16 @@ def render_svg_preview(
     # Top-right escalation banner pill
     if path_result.escalation_paths:
         hero = path_result.escalation_paths[0].chain_str()
-        pill_text = f"CRITICAL {path_result.escalation_paths[0].hops}-HOP: {hero}"
-        pill_w = min(width - 420, max(280, len(pill_text) * 7 + 26))
+        ep0 = path_result.escalation_paths[0]
+        ep0_pairs = [(ep0.nodes[i], ep0.nodes[i + 1]) for i in range(len(ep0.nodes) - 1)]
+        ep0_verified = bool(ep0_pairs) and all(p in verified_set for p in ep0_pairs)
+        pill_prefix = "KERNEL TRACE VERIFIED · " if ep0_verified else f"CRITICAL {ep0.hops}-HOP: "
+        pill_text = f"{pill_prefix}{hero}"
+        pill_w = min(width - 400, max(300, len(pill_text) * 6.8 + 28))
         pill_x = width - pill_w - 20
+        pill_stroke = "#facc15" if ep0_verified else "#ef4444"
         parts.append(
-            f'<rect x="{pill_x}" y="18" width="{pill_w}" height="34" rx="7" fill="#3a121b" stroke="#ef4444" stroke-width="1.4" />'
+            f'<rect x="{pill_x}" y="18" width="{pill_w}" height="34" rx="7" fill="#3a121b" stroke="{pill_stroke}" stroke-width="1.5" />'
         )
         parts.append(
             f'<text x="{pill_x + pill_w / 2:.1f}" y="39" text-anchor="middle" fill="#fecaca" font-size="11.5" font-weight="700" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">{html.escape(pill_text)}</text>'
@@ -1275,21 +1320,26 @@ def render_svg_preview(
             continue
         d, lx, ly = _svg_edge_curve(sp, dp, -1.15)
         in_chain = (e.src, e.dst) in chain_hop_labels
-        sw = 3.2 if in_chain else 2.2
-        filt = ' filter="url(#crimson-glow)"' if in_chain else ""
+        is_verified = (e.src, e.dst) in verified_set
+        sw = 3.2 if (in_chain or is_verified) else 2.2
+        filt = ' filter="url(#crimson-glow)"' if (in_chain or is_verified) else ""
         parts.append(
             f'<path d="{d}" fill="none" stroke="#ef4444" stroke-width="{sw}" '
             f'marker-end="url(#arrow-esc)"{filt} />'
         )
-        if in_chain:
-            lbl = chain_hop_labels[(e.src, e.dst)]
-            bw = len(lbl) * 6.4 + 14
+        if in_chain or is_verified:
+            base_lbl = chain_hop_labels.get((e.src, e.dst), e.mechanism)
+            lbl = f"{base_lbl} · KERNEL TRACE VERIFIED" if is_verified else base_lbl
+            bw = len(lbl) * 6.3 + 16
+            pill_fill = "#422006" if is_verified else "#3a121b"
+            pill_stroke = "#facc15" if is_verified else "#ef4444"
+            pill_text_fill = "#fde047" if is_verified else "#fecaca"
             parts.append(
                 f'<rect x="{lx - bw / 2:.1f}" y="{ly - 10:.1f}" width="{bw:.1f}" height="20" rx="4" '
-                f'fill="#3a121b" stroke="#ef4444" stroke-width="1" />'
+                f'fill="{pill_fill}" stroke="{pill_stroke}" stroke-width="1.1" />'
             )
             parts.append(
-                f'<text x="{lx:.1f}" y="{ly + 3.5:.1f}" text-anchor="middle" fill="#fecaca" '
+                f'<text x="{lx:.1f}" y="{ly + 3.5:.1f}" text-anchor="middle" fill="{pill_text_fill}" '
                 f'font-size="10" font-weight="700" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">'
                 f"{html.escape(lbl)}</text>"
             )

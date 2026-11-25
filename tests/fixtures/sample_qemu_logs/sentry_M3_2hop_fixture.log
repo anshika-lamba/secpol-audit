@@ -1,0 +1,34 @@
+# SYNTHETIC UNIT-TEST FIXTURE — NOT A REAL QNX TARGET CAPTURE
+# Models expected QNX Neutrino 8.0 `secpol_sentry` (`libsecpolev`) serial output
+# for mutant `M3_sentry_escalate` (2-hop escalation + custom-class enforcement).
+=== SECPOL_AUDIT_MUTANT=M3_sentry_escalate ===
+SENTRY_READY pid=4097 path=/dev/secpol_sentry
+SECPOLEV_READY pid=4097
+SECPOLEV_JSON:{"ts_ns":1001000000,"verdict":"OK","proc":"secpol_sentry","type":"secpol_sentry_t","kind":"ability","ability":"trace","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":1001200000,"verdict":"OK","proc":"secpol_sentry","type":"secpol_sentry_t","kind":"attach","ability":"","root":false,"range":null,"path":"/dev/secpol_sentry","status":"attached","class":"","perm":"","obj_type":""}
+CAN_SERVER_READY pid=4098 path=/dev/name/local/can_ctrl
+SECPOLEV_JSON:{"ts_ns":1002100000,"verdict":"OK","proc":"can_server","type":"can_hal_t","kind":"attach","ability":"","root":false,"range":null,"path":"/dev/name/local/can_ctrl","status":"attached","class":"","perm":"","obj_type":""}
+=== PIDIN_BEGIN ===
+     pid secpol_type        name
+       1 -                  proc/boot/procnto-smp-instr
+    4097 secpol_sentry_t    proc/boot/secpol_sentry
+    4098 can_hal_t          proc/boot/can_server
+=== PIDIN_END ===
+DIRECT_RESULT=DENIED errno=1
+SECPOLEV_JSON:{"ts_ns":1003500000,"verdict":"DENIED","proc":"ivi_exploit","type":"ivi_ui_t","kind":"ability","ability":"channel_connect","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+HOP1_SPAWN=OK child_pid=16388
+SECPOLEV_JSON:{"ts_ns":1003800000,"verdict":"OK","proc":"ivi_exploit","type":"ivi_ui_t","kind":"ability","ability":"settypeid","root":false,"range":[4,4],"path":"","status":"","class":"","perm":"","obj_type":""}
+DIAG_HELPER_START pid=16388
+HOP2_SPAWN=OK child_pid=16389
+SECPOLEV_JSON:{"ts_ns":1004200000,"verdict":"OK","proc":"diag_helper","type":"diag_helper_t","kind":"ability","ability":"settypeid","root":false,"range":[2,2],"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_ALERT:{"kind":"multi_hop_chain","chain":["ivi_ui_t","diag_helper_t"],"ts_ns":1004200000}
+HOP2_PROBE_START pid=16389
+HOP2_RESULT=GRANTED coid=1073741825
+SECPOLEV_JSON:{"ts_ns":1004600000,"verdict":"OK","proc":"diag_helper","type":"can_hal_t","kind":"ability","ability":"channel_connect","root":false,"range":[2,2],"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_ALERT:{"kind":"multi_hop_chain","chain":["ivi_ui_t","diag_helper_t","can_hal_t"],"ts_ns":1004600000}
+SECPOLEV_JSON:{"ts_ns":1005100000,"verdict":"OK","proc":"cat","type":"audit_reader_t","kind":"custom","ability":"","root":false,"range":null,"path":"","status":"","class":"sentry","perm":"read_events","obj_type":"secpol_sentry_t"}
+SENTRY_READ_AUTH=OK
+SECPOLEV_JSON:{"ts_ns":1005400000,"verdict":"DENIED","proc":"cat","type":"ivi_ui_t","kind":"custom","ability":"","root":false,"range":null,"path":"","status":"","class":"sentry","perm":"read_events","obj_type":"secpol_sentry_t"}
+SENTRY_READ_UNAUTH=DENIED
+SECPOLEV_STATS: ok=7 denied=2 dropped=0
+=== SECPOL_AUDIT_DONE ===
