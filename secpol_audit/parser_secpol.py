@@ -14,12 +14,16 @@ from secpol_audit.ir import (
     AttachRule,
     AttributeDecl,
     ChannelConnectRule,
+    ClassAllowRule,
+    ClassDecl,
+    CustomAbilityDecl,
     DefaultSpawnTypeRule,
     DeriveTypeRule,
     LinkRule,
     MountPointRule,
     ParseDiagnostic,
     PolicyIR,
+    RangeDecl,
     SourceSpan,
     TypeDecl,
 )
@@ -281,6 +285,12 @@ class SecpolParser:
                 self._parse_attribute(ir)
             elif kw == "type":
                 self._parse_type(ir)
+            elif kw == "range":
+                self._parse_range(ir)
+            elif kw == "ability":
+                self._parse_ability_decl(ir)
+            elif kw == "class":
+                self._parse_class_decl(ir)
             elif kw == "allow":
                 self._parse_allow(ir)
             elif kw == "allow_attach":
@@ -413,6 +423,80 @@ class SecpolParser:
             span=self.span_of(start, end),
         )
 
+    def _parse_range(self, ir: PolicyIR) -> None:
+        start = self.advance()  # 'range'
+        name_tok = self.expect("WORD", "range name")
+        name = self._validate_ident(name_tok, "range")
+        end = self.expect("SEMI", "';'")
+
+        if name in ir.ranges:
+            raise self.error(
+                "PARSE_ERROR",
+                f"Duplicate range declaration '{name}' (previously declared at line {ir.ranges[name].span.line})",
+                name_tok,
+            )
+        ir.ranges[name] = RangeDecl(name=name, span=self.span_of(start, end))
+
+    def _parse_ability_decl(self, ir: PolicyIR) -> None:
+        start = self.advance()  # 'ability'
+        name_tok = self.expect("WORD", "custom ability name")
+        if not ABILITY_NAME_RE.match(name_tok.value):
+            raise self.error(
+                "PARSE_ERROR",
+                f"Invalid custom ability name '{name_tok.value}'",
+                name_tok,
+            )
+        name = name_tok.value
+        end = self.expect("SEMI", "';'")
+
+        if name in ir.custom_abilities:
+            raise self.error(
+                "PARSE_ERROR",
+                f"Duplicate custom ability declaration '{name}' "
+                f"(previously declared at line {ir.custom_abilities[name].span.line})",
+                name_tok,
+            )
+        ir.custom_abilities[name] = CustomAbilityDecl(name=name, span=self.span_of(start, end))
+
+    def _parse_class_decl(self, ir: PolicyIR) -> None:
+        start = self.advance()  # 'class'
+        name_tok = self.expect("WORD", "class name")
+        name = self._validate_ident(name_tok, "class")
+        if name in ("channel", "ability"):
+            raise self.error(
+                "PARSE_ERROR",
+                f"Built-in permission class '{name}' cannot be redeclared",
+                name_tok,
+            )
+        if name in ir.classes:
+            raise self.error(
+                "PARSE_ERROR",
+                f"Duplicate class declaration '{name}' (previously declared at line {ir.classes[name].span.line})",
+                name_tok,
+            )
+
+        open_brace = self.expect("LBRACE", "'{' for class permission list")
+        perms: list[str] = []
+        while self.peek().kind != "RBRACE":
+            cur = self.peek()
+            if cur.kind == "EOF":
+                raise self.error("PARSE_ERROR", "Unterminated '{' in class declaration", open_brace)
+            if cur.kind != "WORD":
+                raise self.error(
+                    "PARSE_ERROR",
+                    f"Expected permission name inside class '{name}', got '{cur.value}'",
+                    cur,
+                )
+            self.advance()
+            perm_name = self._validate_ident(cur, "class permission")
+            if perm_name not in perms:
+                perms.append(perm_name)
+        self.advance()  # '}'
+        if not perms:
+            raise self.error("PARSE_ERROR", f"Empty permission list '{{}}' in class '{name}'", open_brace)
+        end = self.expect("SEMI", "';'")
+        ir.classes[name] = ClassDecl(name=name, permissions=tuple(perms), span=self.span_of(start, end))
+
     def _parse_ident_or_set(self, role: str) -> tuple[str, ...]:
         tok = self.peek()
         if tok.kind == "LBRACE":
@@ -447,17 +531,87 @@ class SecpolParser:
         targets = self._parse_ident_or_set("target type")
         self.expect("COLON", "':'")
 
-        class_tok = self.expect("WORD", "permission class ('channel' or 'ability')")
+        class_tok = self.expect("WORD", "permission class ('channel', 'ability', or declared custom class)")
         if class_tok.value == "channel":
             self._parse_allow_channel(ir, start, sources, targets)
         elif class_tok.value == "ability":
             self._parse_allow_ability(ir, start, sources, targets)
+        elif class_tok.value in ir.classes:
+            self._parse_allow_custom_class(ir, start, sources, targets, class_tok)
         else:
             raise self.error(
                 "UNSUPPORTED_CONSTRUCT",
-                f"Unsupported allow class '{class_tok.value}' (supported: 'channel', 'ability')",
+                f"Unsupported allow class '{class_tok.value}' "
+                "(supported: 'channel', 'ability', or a declared 'class <name> { ... };')",
                 class_tok,
             )
+
+    def _parse_allow_custom_class(
+        self,
+        ir: PolicyIR,
+        start: Token,
+        sources: tuple[str, ...],
+        targets: tuple[str, ...],
+        class_tok: Token,
+    ) -> None:
+        class_decl = ir.classes[class_tok.value]
+        allowed_perms = set(class_decl.permissions)
+        perms: list[str] = []
+
+        if self.peek().kind == "LBRACE":
+            open_brace = self.advance()
+            while self.peek().kind != "RBRACE":
+                cur = self.peek()
+                if cur.kind == "EOF":
+                    raise self.error(
+                        "PARSE_ERROR",
+                        f"Unterminated '{{' in '{class_tok.value}' permission set",
+                        open_brace,
+                    )
+                if cur.kind != "WORD":
+                    raise self.error(
+                        "PARSE_ERROR",
+                        f"Unexpected token '{cur.value}' in '{class_tok.value}' permission set",
+                        cur,
+                    )
+                self.advance()
+                if cur.value not in allowed_perms:
+                    raise self.error(
+                        "PARSE_ERROR",
+                        f"Unknown permission '{cur.value}' for class '{class_tok.value}' "
+                        f"(declared permissions: {', '.join(class_decl.permissions)})",
+                        cur,
+                    )
+                perms.append(cur.value)
+            self.advance()
+            if not perms:
+                raise self.error(
+                    "PARSE_ERROR",
+                    f"Empty permission set '{{}}' for class '{class_tok.value}'",
+                    open_brace,
+                )
+        else:
+            perm_tok = self.expect("WORD", f"permission name for class '{class_tok.value}'")
+            if perm_tok.value not in allowed_perms:
+                raise self.error(
+                    "PARSE_ERROR",
+                    f"Unknown permission '{perm_tok.value}' for class '{class_tok.value}' "
+                    f"(declared permissions: {', '.join(class_decl.permissions)})",
+                    perm_tok,
+                )
+            perms.append(perm_tok.value)
+
+        end = self.expect("SEMI", "';'")
+        ir.class_rules.append(
+            ClassAllowRule(
+                sources=sources,
+                targets=targets,
+                class_name=class_tok.value,
+                permissions=tuple(perms),
+                span=self.span_of(start, end),
+                raw=self.raw_slice(start, end),
+            )
+        )
 
     def _parse_allow_channel(
         self,
@@ -525,14 +679,13 @@ class SecpolParser:
         raw_arg: str | None = None
         end_tok = name_tok
 
-        if self.peek().kind == "COLON":
-            colon_tok = self.advance()
+        def _parse_ability_arg_item(colon_or_comma_tok: Token) -> tuple[str, Token]:
             arg_tok = self.peek()
-            if arg_tok.kind != "WORD" or arg_tok.line != colon_tok.line:
+            if arg_tok.kind != "WORD" or arg_tok.line != colon_or_comma_tok.line:
                 raise self.error(
                     "PARSE_ERROR",
-                    f"Malformed ability '{name_tok.value}:': missing parameter after ':'",
-                    colon_tok,
+                    f"Malformed ability '{name_tok.value}': missing parameter after '{colon_or_comma_tok.value}'",
+                    colon_or_comma_tok,
                 )
             if not ABILITY_ARG_RE.match(arg_tok.value):
                 raise self.error(
@@ -541,29 +694,43 @@ class SecpolParser:
                     arg_tok,
                 )
             self.advance()
-            args.append(arg_tok.value)
-            end_tok = arg_tok
+            parts = [arg_tok.value]
+            last_tok = arg_tok
+
+            # QNX 8.0 `gain_priv:class:perm:type` supports colon-separated segments inside each parameter
+            if name_tok.value == "gain_priv":
+                while self.peek().kind == "COLON":
+                    seg_colon = self.advance()
+                    seg_tok = self.peek()
+                    if seg_tok.kind != "WORD" or seg_tok.line != seg_colon.line:
+                        raise self.error(
+                            "PARSE_ERROR",
+                            f"Malformed ability 'gain_priv': missing segment after ':'",
+                            seg_colon,
+                        )
+                    if not ABILITY_ARG_RE.match(seg_tok.value):
+                        raise self.error(
+                            "PARSE_ERROR",
+                            f"Invalid segment '{seg_tok.value}' in ability 'gain_priv'",
+                            seg_tok,
+                        )
+                    self.advance()
+                    parts.append(seg_tok.value)
+                    last_tok = seg_tok
+
+            return ":".join(parts), last_tok
+
+        if self.peek().kind == "COLON":
+            colon_tok = self.advance()
+            item_val, end_tok = _parse_ability_arg_item(colon_tok)
+            args.append(item_val)
 
             while self.peek().kind == "COMMA":
                 comma_tok = self.advance()
-                next_arg = self.peek()
-                if next_arg.kind != "WORD" or next_arg.line != comma_tok.line:
-                    raise self.error(
-                        "PARSE_ERROR",
-                        f"Malformed ability '{name_tok.value}': missing parameter after ','",
-                        comma_tok,
-                    )
-                if not ABILITY_ARG_RE.match(next_arg.value):
-                    raise self.error(
-                        "PARSE_ERROR",
-                        f"Invalid parameter '{next_arg.value}' for ability '{name_tok.value}'",
-                        next_arg,
-                    )
-                self.advance()
-                args.append(next_arg.value)
-                end_tok = next_arg
+                item_val, end_tok = _parse_ability_arg_item(comma_tok)
+                args.append(item_val)
 
-            # Reject double colon like `settypeid:a:b` unless part of range? Colon isn't in hex ranges.
+            # Reject unexpected extra ':' on non-gain_priv abilities (e.g., `settypeid:a_t:b_t`)
             if self.peek().kind == "COLON":
                 raise self.error(
                     "PARSE_ERROR",

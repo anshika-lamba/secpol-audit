@@ -365,6 +365,24 @@ def run_policy_checks(policy: PolicyIR) -> list[Finding]:
                         for concrete_t, _ in policy.expand_subject(target, allow_default_rules=False):
                             connected_concrete_targets.add(concrete_t)
 
+    # Check custom class allow rules for undeclared sources/targets
+    for clrule in policy.class_rules:
+        for role, idents in (("source", clrule.sources), ("target", clrule.targets)):
+            for ident in idents:
+                if not policy.is_declared_identifier(ident):
+                    findings.append(
+                        Finding(
+                            rule_id="UNDECLARED_TYPE_REFERENCE",
+                            severity=Severity.ERROR,
+                            message=(
+                                f"allow '{clrule.class_name}' rule references undeclared {role} '{ident}'"
+                            ),
+                            span=clrule.span,
+                            remediation=f"Declare 'type {ident};' or 'attribute {ident};' before referencing it.",
+                            metadata={"identifier": ident, "class": clrule.class_name, "role": role},
+                        )
+                    )
+
     # Check channel connect rules
     for crule in policy.connect_rules:
         for src in crule.sources:

@@ -29,7 +29,10 @@ int main(void) {
     if (attach == NULL) {
         fprintf(stderr, "CAN_SERVER_INIT=FAILED errno=%d (%s)\n", errno, strerror(errno));
         fflush(stderr);
-        fflush(stdout); sleep(8); return EXIT_FAILURE;
+        fflush(stdout);
+        /* Keep untyped server alive in M2_untyped_server long enough for `pidin -f a_n` to capture it */
+        sleep(8);
+        return EXIT_FAILURE;
     }
 
     printf("CAN_SERVER_READY pid=%d path=/dev/name/local/%s\n", (int)getpid(), CAN_ATTACH_NAME);

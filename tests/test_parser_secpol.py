@@ -281,3 +281,86 @@ def test_qnx_sdp_common_abilities_public_channel_pathspace_procmgr() -> None:
         ("procmgr_ability", (), ("custom_cap",)),
     ]
 
+
+def test_named_range_custom_ability_and_custom_class_declarations() -> None:
+    src = """
+    range gpu_mem;
+    range dsp_sram;
+    ability network/bind/privport;
+    class ipc_bus { read write admin };
+
+    type net_t;
+    type gpu_t;
+    type cli_t;
+
+    allow net_t self:ability {
+        nonroot network/bind/privport
+    };
+    allow gpu_t self:ability {
+        mem_phys:gpu_mem
+        mem_phys:0x10000000-0x10010000,dsp_sram
+    };
+    allow cli_t gpu_t : ipc_bus read;
+    allow cli_t gpu_t : ipc_bus { read write };
+    allow cli_t self:ability {
+        settypeid:gpu_t
+        gain_priv:ipc_bus:admin:gpu_t
+        gain_priv:mem_phys,ipc_bus:write:gpu_t
+    };
+    """
+    ir = parse_secpol_text(src, "qnx8_ext.secpol")
+    assert set(ir.ranges.keys()) == {"gpu_mem", "dsp_sram"}
+    assert set(ir.custom_abilities.keys()) == {"network/bind/privport"}
+    assert "ipc_bus" in ir.classes
+    assert ir.classes["ipc_bus"].permissions == ("read", "write", "admin")
+    assert len(ir.class_rules) == 2
+    assert ir.class_rules[0].permissions == ("read",)
+    assert ir.class_rules[1].permissions == ("read", "write")
+
+    # Verify mixed numeric + named ranges and gain_priv:class:perm:type parsed intact
+    all_specs = [s for r in ir.ability_rules for s in r.abilities]
+    mem_args = [s.args for s in all_specs if s.name == "mem_phys"]
+    assert ("gpu_mem",) in mem_args
+    assert ("0x10000000-0x10010000", "dsp_sram") in mem_args
+
+    gp_args = [s.args for s in all_specs if s.name == "gain_priv"]
+    assert ("ipc_bus:admin:gpu_t",) in gp_args
+    assert ("mem_phys", "ipc_bus:write:gpu_t") in gp_args
+
+
+def test_custom_class_and_gain_priv_fail_closed_validation() -> None:
+    # Unknown permission for declared class -> PARSE_ERROR
+    bad_perm = """
+    class ipc_bus { read write };
+    type a_t;
+    type b_t;
+    allow a_t b_t : ipc_bus delete;
+    """
+    with pytest.raises(ParseDiagnostic) as exc1:
+        parse_secpol_text(bad_perm, "bad_perm.secpol")
+    assert exc1.value.code == "PARSE_ERROR"
+
+    # Duplicate range / ability / class declarations -> PARSE_ERROR
+    with pytest.raises(ParseDiagnostic) as exc2:
+        parse_secpol_text("range r1;\nrange r1;\n", "dup_range.secpol")
+    assert exc2.value.code == "PARSE_ERROR"
+
+    with pytest.raises(ParseDiagnostic) as exc3:
+        parse_secpol_text("ability custom/a;\nability custom/a;\n", "dup_ab.secpol")
+    assert exc3.value.code == "PARSE_ERROR"
+
+    with pytest.raises(ParseDiagnostic) as exc4:
+        parse_secpol_text("class c1 { r };\nclass c1 { r };\n", "dup_cls.secpol")
+    assert exc4.value.code == "PARSE_ERROR"
+
+    # Malformed gain_priv trailing or double colon -> PARSE_ERROR
+    with pytest.raises(ParseDiagnostic) as exc5:
+        parse_secpol_text("type a_t;\nallow a_t self:ability { gain_priv:cls::type };\n", "bad_gp.secpol")
+    assert exc5.value.code == "PARSE_ERROR"
+
+    # Truly unknown top-level keyword still fails closed with UNSUPPORTED_CONSTRUCT
+    with pytest.raises(ParseDiagnostic) as exc6:
+        parse_secpol_text("unknown_directive foo;\n", "bad_kw.secpol")
+    assert exc6.value.code == "UNSUPPORTED_CONSTRUCT"
+
+

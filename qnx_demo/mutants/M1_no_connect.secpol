@@ -1,7 +1,7 @@
 # Mutant M1_no_connect: ivi_ui_t can spawn diag_helper_t, but diag_helper_t has
 # neither settypeid:can_hal_t nor channel connect to can_hal_t.
 # Static prediction: 0 escalation chains (diag_helper_t is NOT a high-privilege sink)
-# Runtime prediction: DIRECT_RESULT=DENIED, HOP1_SPAWN=OK, HOP2_TRANSITION=DENIED, HOP2_RESULT=DENIED
+# Runtime prediction: DIRECT_RESULT=DENIED, HOP1_SPAWN=OK, HOP2_SPAWN=DENIED errno=1
 
 type slogger2_t;
 type can_hal_t;

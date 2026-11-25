@@ -106,6 +106,8 @@ def _check_agreement(
         parts.append(f"hop1={obs.hop1_spawn}")
     if obs.hop2_result:
         parts.append(f"hop2={obs.hop2_result}")
+    elif obs.hop2_spawn:
+        parts.append(f"hop2_spawn={obs.hop2_spawn}")
     if observed_untyped:
         parts.append("pidin=UNTYPED")
     observed_str = ", ".join(parts) or "no telemetry"

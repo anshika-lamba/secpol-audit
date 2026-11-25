@@ -99,6 +99,25 @@ class AttributeDecl:
 
 
 @dataclass(frozen=True)
+class RangeDecl:
+    name: str
+    span: SourceSpan
+
+
+@dataclass(frozen=True)
+class CustomAbilityDecl:
+    name: str
+    span: SourceSpan
+
+
+@dataclass(frozen=True)
+class ClassDecl:
+    name: str
+    permissions: tuple[str, ...]
+    span: SourceSpan
+
+
+@dataclass(frozen=True)
 class TypeDecl:
     name: str
     attributes: tuple[str, ...]
@@ -137,6 +156,16 @@ class AbilityRule:
 class ChannelConnectRule:
     sources: tuple[str, ...]
     targets: tuple[str, ...]
+    span: SourceSpan
+    raw: str
+
+
+@dataclass(frozen=True)
+class ClassAllowRule:
+    sources: tuple[str, ...]
+    targets: tuple[str, ...]
+    class_name: str
+    permissions: tuple[str, ...]
     span: SourceSpan
     raw: str
 
@@ -198,8 +227,12 @@ class PolicyIR:
     source_path: str
     attributes: dict[str, AttributeDecl] = field(default_factory=dict)
     types: dict[str, TypeDecl] = field(default_factory=dict)
+    ranges: dict[str, RangeDecl] = field(default_factory=dict)
+    custom_abilities: dict[str, CustomAbilityDecl] = field(default_factory=dict)
+    classes: dict[str, ClassDecl] = field(default_factory=dict)
     ability_rules: list[AbilityRule] = field(default_factory=list)
     connect_rules: list[ChannelConnectRule] = field(default_factory=list)
+    class_rules: list[ClassAllowRule] = field(default_factory=list)
     attach_rules: list[AttachRule] = field(default_factory=list)
     link_rules: list[LinkRule] = field(default_factory=list)
     derive_rules: list[DeriveTypeRule] = field(default_factory=list)
@@ -217,15 +250,7 @@ class PolicyIR:
     def types_with_allow_rules(self) -> set[str]:
         """Types that have at least one explicit `allow` rule (directly or via attribute)."""
         active: set[str] = set()
-        for rule in self.ability_rules:
-            for src in rule.sources:
-                if src == "default_rules":
-                    continue
-                if src in self.types:
-                    active.add(src)
-                elif src in self.attributes:
-                    active.update(self.types_for_attribute(src))
-        for rule in self.connect_rules:
+        for rule in (*self.ability_rules, *self.connect_rules, *self.class_rules):
             for src in rule.sources:
                 if src == "default_rules":
                     continue
