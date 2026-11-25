@@ -1,23 +1,15 @@
-# QNX Neutrino 8.0 x86_64 QEMU TCG (`-accel tcg -nographic`) Boot Image Template
-# Placeholders substituted by qnx_demo/Makefile:
-#   @SECPOL_BIN@     -> compiled .secpol.bin file path
-#   @CAN_SERVER_CMD@ -> `on -T can_hal_t -u 23:23 /proc/boot/can_server &` (or untyped in M2)
-#   @MUTANT_NAME@    -> mutant identifier printed in serial log
-
-[virtual=x86_64,bios +compress] boot = {
-    startup-x86 -D8250..115200
-    PATH=/proc/boot:/bin:/usr/bin LD_LIBRARY_PATH=/proc/boot:/lib:/usr/lib procnto-smp-instr -v
+[virtual=x86_64,multiboot] boot = {
+    startup-x86 -D 8250
+    PATH=/proc/boot:/bin:/usr/bin LD_LIBRARY_PATH=/proc/boot:/lib:/usr/lib procnto-smp-instr
 }
 
 [+script] startup-script = {
-    display_msg "=== SECPOL_AUDIT_MUTANT=@MUTANT_NAME@ ==="
     PATH=/proc/boot:/bin:/usr/bin
     LD_LIBRARY_PATH=/proc/boot:/lib:/usr/lib
+    reopen /dev/text
 
-    secpolpush /etc/secpol.bin
-
-    on -T slogger2_t -u 20:20 slogger2
-    waitfor /dev/slog2 5
+    display_msg "=== SECPOL_AUDIT_MUTANT=@MUTANT_NAME@ ==="
+    secpolpush /proc/boot/secpol.bin
 
     @CAN_SERVER_CMD@
     waitfor /dev/name/local/can_ctrl 5
@@ -27,21 +19,18 @@
     display_msg "=== PIDIN_END ==="
 
     on -T ivi_ui_t -u 31:31 /proc/boot/ivi_exploit
-    sleep 1
     display_msg "=== SECPOL_AUDIT_DONE ==="
 }
 
-[type=link] /bin/sh=/proc/boot/ksh
-[type=link] /dev/console=/dev/ser1
+/proc/boot/secpol.bin=@SECPOL_BIN@
 
-/etc/secpol.bin=@SECPOL_BIN@
-
-[data=copy]
+[autoso=add]
+/usr/lib/ldqnx-64.so.2=ldqnx-64.so.2
+libc.so.6
+libsecpol.so
 /proc/boot/secpolpush=secpolpush
-/proc/boot/slogger2=slogger2
 /proc/boot/on=on
 /proc/boot/pidin=pidin
-/proc/boot/ksh=ksh
 /proc/boot/can_server=build/can_server
 /proc/boot/diag_helper=build/diag_helper
 /proc/boot/ivi_exploit=build/ivi_exploit

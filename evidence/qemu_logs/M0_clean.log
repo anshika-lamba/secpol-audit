@@ -1,0 +1,17 @@
+
+non UEFI or UEFI+CSM boot
+ACPI table not found (0x4746434d)
+System behaves poorly without PCID support.
+overriding mask for controller 2, vector_base 0
+=== SECPOL_AUDIT_MUTANT=M0_clean ===
+CAN_SERVER_READY pid=4098 path=/dev/name/local/can_ctrl
+=== PIDIN_BEGIN ===
+     pid type             name                                                                             
+       1 -                /proc/boot/procnto-smp-instr                                                     
+    4098 can_hal_t        proc/boot/can_server                                                             
+    8195 -                proc/boot/pidin                                                                  
+=== PIDIN_END ===
+IVI_EXPLOIT_START pid=12291
+DIRECT_RESULT=DENIED errno=1 (Operation not permitted)
+HOP1_SPAWN=DENIED errno=1 (Operation not permitted)
+=== SECPOL_AUDIT_DONE ===

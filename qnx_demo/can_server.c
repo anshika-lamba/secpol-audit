@@ -29,7 +29,7 @@ int main(void) {
     if (attach == NULL) {
         fprintf(stderr, "CAN_SERVER_INIT=FAILED errno=%d (%s)\n", errno, strerror(errno));
         fflush(stderr);
-        return EXIT_FAILURE;
+        fflush(stdout); sleep(8); return EXIT_FAILURE;
     }
 
     printf("CAN_SERVER_READY pid=%d path=/dev/name/local/%s\n", (int)getpid(), CAN_ATTACH_NAME);

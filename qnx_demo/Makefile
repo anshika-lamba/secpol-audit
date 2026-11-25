@@ -1,7 +1,7 @@
 # QNX Neutrino 8.0 Cross-Compilation & Mutant Image Build Makefile
 # Requires QNX SDP 8.0 environment sourced (`source ~/qnx800/qnxsdp-env.sh`).
 
-CC            ?= qcc
+CC            := qcc
 TARGET_FLAGS  ?= -Vgcc_ntox86_64
 CFLAGS        ?= -Wall -Wextra -O2
 LDFLAGS       ?= -lsecpol

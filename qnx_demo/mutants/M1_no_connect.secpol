@@ -9,7 +9,6 @@ type planner_t;
 type diag_helper_t;
 type ivi_ui_t;
 
-allow default_rules slogger2_t : channel connect;
 
 allow_attach slogger2_t /dev/slog2;
 allow slogger2_t self:ability {
@@ -38,4 +37,5 @@ allow ivi_ui_t diag_helper_t : channel connect;
 allow ivi_ui_t self:ability {
     nonroot
     settypeid:diag_helper_t
+    gain_priv:pathspace,channel_connect
 };

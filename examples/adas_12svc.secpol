@@ -34,10 +34,9 @@ type ivi_ui_t, net_client_a;
 
 # Mount points (standard QNX 8.0 policy syntax)
 mount_point 0:0 { u::rwx g::rx o::rx } /dev;
-mount_point 0:0 0755 /tmp;
+mount_point 0:0 rwxr-xr-x /tmp;
 
 # Default rule: every active type with an allow rule may log to slogger2_t
-allow default_rules slogger2_t : channel connect;
 
 # --- Core / System rules ---
 allow_attach slogger2_t /dev/slog2;
@@ -100,6 +99,7 @@ allow_attach diag_helper_t /dev/diag;
 allow diag_helper_t self:ability {
     nonroot
     settypeid:can_hal_t
+    gain_priv:mem_phys,io
 };
 
 # Hop 1: untrusted IVI infotainment UI can spawn/transition into diag_helper_t!
@@ -107,4 +107,5 @@ allow ivi_ui_t diag_helper_t : channel connect;
 allow ivi_ui_t self:ability {
     nonroot
     settypeid:diag_helper_t
+    gain_priv:pathspace,settypeid
 };

@@ -9,7 +9,6 @@ type planner_t;
 type diag_helper_t;
 type ivi_ui_t;
 
-allow default_rules slogger2_t : channel connect;
 
 allow_attach slogger2_t /dev/slog2;
 allow slogger2_t self:ability {
@@ -36,6 +35,7 @@ allow_attach diag_helper_t /dev/diag;
 allow diag_helper_t self:ability {
     nonroot
     settypeid:can_hal_t
+    gain_priv:mem_phys,io,channel_connect
 };
 
 # Hop 1: untrusted ivi_ui_t can spawn diag_helper_t
@@ -43,4 +43,5 @@ allow ivi_ui_t diag_helper_t : channel connect;
 allow ivi_ui_t self:ability {
     nonroot
     settypeid:diag_helper_t
+    gain_priv:pathspace,settypeid
 };

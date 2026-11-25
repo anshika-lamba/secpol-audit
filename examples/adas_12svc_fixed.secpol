@@ -30,9 +30,8 @@ type telemetry_t, net_client_a;
 type ivi_ui_t, net_client_a;
 
 mount_point 0:0 { u::rwx g::rx o::rx } /dev;
-mount_point 0:0 0755 /tmp;
+mount_point 0:0 rwxr-xr-x /tmp;
 
-allow default_rules slogger2_t : channel connect;
 
 # --- Core / System rules ---
 allow_attach slogger2_t /dev/slog2;
