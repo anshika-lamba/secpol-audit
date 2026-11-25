@@ -80,6 +80,20 @@ RULE_DESCRIPTIONS: dict[str, tuple[str, str]] = {
         "Expected build.ifs service not observed in runtime snapshot",
         "A service configured in build.ifs did not appear in the pidin -f a_n process snapshot.",
     ),
+    "KERNEL_TRACE_ESCALATION_OBSERVED": (
+        "Transitive privilege escalation chain confirmed by live QNX libsecpolev kernel trace",
+        "Observed QNX Neutrino 8.0 libsecpolev microkernel security events confirmed that settypeid "
+        "transition hops in a static escalation chain actually succeeded at runtime.",
+    ),
+    "SECPOLEV_DROPPED_EVENTS": (
+        "QNX libsecpolev kernel telemetry dropped security events",
+        "secpolev_get_dropped_count() reported non-zero dropped events, indicating incomplete trace coverage.",
+    ),
+    "UNEXPECTED_RUNTIME_DENIAL": (
+        "Declared service denied a capability permitted by static policy",
+        "libsecpolev recorded a DENIED verdict on a declared service type for an ability, attach path, "
+        "or custom permission that is explicitly granted in the audited .secpol policy.",
+    ),
 }
 
 

@@ -70,3 +70,36 @@ jobs:
           }.issubset(rule_ids)
           print(f"SARIF 2.1.0 smoke-test passed ({len(results)} results)")
           PY
+
+      - name: Smoke-test secpol-audit verify-events on synthetic sentry fixtures
+        run: |
+          secpol-audit check qnx_demo/mutants/M0_sentry_clean.secpol --ifs qnx_demo/build_sentry.ifs.in
+          secpol-audit verify-events qnx_demo/mutants/M0_sentry_clean.secpol \
+            --log tests/fixtures/sample_qemu_logs/sentry_M0_clean_fixture.log \
+            --ifs qnx_demo/build_sentry.ifs.in
+
+          set +e
+          secpol-audit verify-events qnx_demo/mutants/M3_sentry_escalate.secpol \
+            --log tests/fixtures/sample_qemu_logs/sentry_M3_2hop_fixture.log \
+            --ifs qnx_demo/build_sentry.ifs.in \
+            --format sarif \
+            --output /tmp/sentry_m3.sarif.json \
+            --html /tmp/sentry_m3.html \
+            --svg /tmp/sentry_m3.svg
+          rc=$?
+          set -e
+          test "$rc" -eq 1
+
+          python3 - <<'PY'
+          import json
+          doc = json.load(open("/tmp/sentry_m3.sarif.json", encoding="utf-8"))
+          assert doc["version"] == "2.1.0"
+          rule_ids = {r["ruleId"] for r in doc["runs"][0]["results"]}
+          assert "KERNEL_TRACE_ESCALATION_OBSERVED" in rule_ids
+          html_doc = open("/tmp/sentry_m3.html", encoding="utf-8").read()
+          svg_doc = open("/tmp/sentry_m3.svg", encoding="utf-8").read()
+          assert "KERNEL TRACE VERIFIED" in html_doc
+          assert "KERNEL TRACE VERIFIED" in svg_doc
+          assert "http://" not in html_doc and "https://" not in html_doc
+          print("verify-events smoke-test passed (SARIF + offline HTML/SVG KERNEL TRACE VERIFIED)")
+          PY

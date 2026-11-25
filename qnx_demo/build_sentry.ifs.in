@@ -1,0 +1,49 @@
+[virtual=x86_64,multiboot] boot = {
+    startup-x86 -D 8250
+    PATH=/proc/boot:/bin:/usr/bin LD_LIBRARY_PATH=/proc/boot:/lib:/usr/lib procnto-smp-instr
+}
+
+[+script] startup-script = {
+    PATH=/proc/boot:/bin:/usr/bin
+    LD_LIBRARY_PATH=/proc/boot:/lib:/usr/lib
+    reopen /dev/text
+
+    display_msg "=== SECPOL_AUDIT_MUTANT=@MUTANT_NAME@ ==="
+    secpolpush /proc/boot/secpol.bin
+
+    on -T secpol_sentry_t -u 25:25 /proc/boot/secpol_sentry -t 6 &
+    waitfor /dev/secpol_sentry 3
+
+    on -T can_hal_t -u 23:23 /proc/boot/can_server &
+    waitfor /dev/name/local/can_ctrl 5
+
+    display_msg "=== PIDIN_BEGIN ==="
+    pidin -f a_n
+    display_msg "=== PIDIN_END ==="
+
+    on -T ivi_ui_t -u 31:31 /proc/boot/ivi_exploit
+
+    on -T audit_reader_t -u 26:26 /proc/boot/ksh -c "cat /dev/secpol_sentry >/dev/null && echo SENTRY_READ_AUTH=OK || echo SENTRY_READ_AUTH=DENIED"
+    on -T ivi_ui_t -u 31:31 /proc/boot/ksh -c "cat /dev/secpol_sentry >/dev/null 2>&1 && echo SENTRY_READ_UNAUTH=OK || echo SENTRY_READ_UNAUTH=DENIED"
+
+    sleep 7
+    display_msg "=== SECPOL_AUDIT_DONE ==="
+}
+
+/proc/boot/secpol.bin=@SECPOL_BIN@
+
+[autoso=add]
+/usr/lib/ldqnx-64.so.2=ldqnx-64.so.2
+libc.so.6
+libsecpol.so
+libsecpolev.so
+/proc/boot/secpolpush=secpolpush
+/proc/boot/on=on
+/proc/boot/pidin=pidin
+/proc/boot/ksh=ksh
+/proc/boot/cat=cat
+/proc/boot/sleep=sleep
+/proc/boot/secpol_sentry=build/secpol_sentry
+/proc/boot/can_server=build/can_server
+/proc/boot/diag_helper=build/diag_helper
+/proc/boot/ivi_exploit=build/ivi_exploit

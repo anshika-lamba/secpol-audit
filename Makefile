@@ -1,8 +1,9 @@
 PYTHON ?= python3
 PYTEST ?= pytest
 MUTANTS := M0_clean M1_no_connect M2_untyped_server M3_2hop_escalate M3_fixed
+SENTRY_MUTANTS := M0_sentry_clean M3_sentry_escalate
 
-.PHONY: test demo-report verify-offline verify-fixtures qemu-mutants clean
+.PHONY: test demo-report verify-offline verify-fixtures qemu-mutants sentry-binaries sentry-images qemu-sentry clean
 
 test:
 	$(PYTEST) -v
@@ -28,6 +29,20 @@ qemu-mutants:
 		bash harness/run_qemu.sh qnx_demo/build/$$m.ifs evidence/qemu_logs/$$m.log 45; \
 	done
 	$(PYTHON) harness/verify_offline.py
+
+sentry-binaries:
+	$(MAKE) -C qnx_demo sentry-binaries
+
+sentry-images:
+	$(MAKE) -C qnx_demo sentry-images
+
+qemu-sentry:
+	$(MAKE) -C qnx_demo sentry-binaries sentry-images
+	@mkdir -p evidence/qemu_logs
+	@for m in $(SENTRY_MUTANTS); do \
+		echo "=== Running QEMU x86_64 TCG for sentry mutant $$m ==="; \
+		bash harness/run_qemu.sh qnx_demo/build/$$m.ifs evidence/qemu_logs/$$m.log 60; \
+	done
 
 clean:
 	$(MAKE) -C qnx_demo clean

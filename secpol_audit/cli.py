@@ -12,6 +12,7 @@ from secpol_audit import __version__
 from secpol_audit.checks import run_all_checks
 from secpol_audit.compile_wrap import CompileResult, run_secpolcompile
 from secpol_audit.diff import PolicyDiffResult, diff_policies
+from secpol_audit.events import correlate_events, parse_events_file
 from secpol_audit.graph_html import render_html_report, render_svg_preview
 from secpol_audit.ir import Finding, ParseDiagnostic
 from secpol_audit.parser_ifs import parse_ifs_file
@@ -281,6 +282,79 @@ def _cmd_verify_runtime(args: argparse.Namespace) -> int:
     return 1 if has_fail else 0
 
 
+def _cmd_verify_events(args: argparse.Namespace) -> int:
+    policy = parse_secpol_file(args.secpol)
+    ifs = parse_ifs_file(args.ifs) if args.ifs else None
+    event_log = parse_events_file(args.log)
+
+    result = correlate_events(event_log, policy, ifs=ifs)
+    verified_edge_set = set(result.verified_edges)
+
+    if args.html:
+        html_doc = render_html_report(
+            result.path_result,
+            findings=result.findings,
+            policy_path=str(args.secpol),
+            ifs_path=str(args.ifs) if args.ifs else None,
+            verified_edges=verified_edge_set,
+        )
+        html_out = Path(args.html)
+        html_out.parent.mkdir(parents=True, exist_ok=True)
+        html_out.write_text(html_doc, encoding="utf-8")
+
+    if args.svg:
+        svg_doc = render_svg_preview(
+            result.path_result,
+            findings=result.findings,
+            policy_path=str(args.secpol),
+            ifs_path=str(args.ifs) if args.ifs else None,
+            verified_edges=verified_edge_set,
+        )
+        svg_out = Path(args.svg)
+        svg_out.parent.mkdir(parents=True, exist_ok=True)
+        svg_out.write_text(svg_doc, encoding="utf-8")
+
+    if args.format == "sarif":
+        out = findings_to_sarif_json(result.findings, default_uri=str(args.log))
+    elif args.format == "json":
+        payload = result.to_dict()
+        payload["policy"] = str(args.secpol)
+        payload["ifs"] = str(args.ifs) if args.ifs else None
+        payload["html_report"] = str(args.html) if args.html else None
+        payload["svg_report"] = str(args.svg) if args.svg else None
+        out = json.dumps(payload, indent=2) + "\n"
+    else:
+        fixture_note = " [SYNTHETIC FIXTURE]" if event_log.is_synthetic_fixture else ""
+        lines = [
+            f"secpol-audit verify-events: {args.secpol} + {args.log}{fixture_note}",
+            (
+                f"Events: {len(event_log.events)} | Alerts: {len(event_log.alerts)} | "
+                f"Verified escalation edges: {len(result.verified_edges)} | "
+                f"Blocked attempts: {len(result.blocked_direct_attempts)} | "
+                f"Custom-perm grants/denials: {len(result.custom_perm_grants)}/{len(result.custom_perm_denials)}"
+            ),
+        ]
+        if event_log.stats is not None:
+            lines.append(
+                f"libsecpolev stats: ok={event_log.stats.ok} denied={event_log.stats.denied} "
+                f"dropped={event_log.stats.dropped}"
+            )
+        if result.verified_edges:
+            edges_str = ", ".join(f"{s} -> {d}" for s, d in result.verified_edges)
+            lines.append(f"Kernel trace verified edges: {edges_str}")
+        if args.html:
+            lines.append(f"Interactive HTML report written to: {args.html}")
+        if args.svg:
+            lines.append(f"Static SVG preview written to: {args.svg}")
+
+        header = "\n".join(lines)
+        out = _format_findings_text(result.findings, header=header)
+
+    _write_output(out, args.output)
+    has_fail = any(f.severity.is_failing for f in result.findings)
+    return 1 if has_fail else 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="secpol-audit",
@@ -331,6 +405,20 @@ def build_parser() -> argparse.ArgumentParser:
     p_rt.add_argument("--format", choices=("text", "json", "sarif"), default="text", help="Output format")
     p_rt.add_argument("--output", "-o", help="Write output to file instead of stdout")
     p_rt.set_defaults(func=_cmd_verify_runtime)
+
+    # verify-events
+    p_ev = sub.add_parser(
+        "verify-events",
+        help="Correlate QNX 8.0 `libsecpolev` kernel telemetry (`secpol_sentry`) against .secpol & build.ifs",
+    )
+    p_ev.add_argument("secpol", help="Path to QNX 8.0 .secpol policy file")
+    p_ev.add_argument("--log", required=True, help="Path to QNX 8.0 serial log containing SECPOLEV_JSON telemetry")
+    p_ev.add_argument("--ifs", help="Optional path to matching QNX 8.0 build.ifs file")
+    p_ev.add_argument("--format", choices=("text", "json", "sarif"), default="text", help="Output format")
+    p_ev.add_argument("--output", "-o", help="Write output to file instead of stdout")
+    p_ev.add_argument("--html", help="Write offline interactive HTML/SVG graph badging trace-verified edges")
+    p_ev.add_argument("--svg", help="Write static standalone SVG graph badging trace-verified edges")
+    p_ev.set_defaults(func=_cmd_verify_events)
 
     return parser
 
