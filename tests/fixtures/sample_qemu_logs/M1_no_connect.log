@@ -1,0 +1,16 @@
+# SYNTHETIC UNIT-TEST FIXTURE (not a real QNX kernel boot capture)
+=== SECPOL_AUDIT_MUTANT=M1_no_connect ===
+CAN_SERVER_READY pid=4099 path=/dev/name/local/can_ctrl
+=== PIDIN_BEGIN ===
+     pid type                 name
+       1                      procnto-smp-instr
+    4098 slogger2_t           /proc/boot/slogger2
+    4099 can_hal_t            /proc/boot/can_server
+=== PIDIN_END ===
+IVI_EXPLOIT_START pid=4105
+DIRECT_RESULT=DENIED errno=1 (Operation not permitted)
+HOP1_SPAWN=OK child_pid=4106
+DIAG_HELPER_START pid=4106
+HOP2_TRANSITION=DENIED errno=1 (Operation not permitted)
+HOP2_RESULT=DENIED errno=13 (Permission denied)
+=== SECPOL_AUDIT_DONE ===

@@ -1,0 +1,49 @@
+# QNX Neutrino 8.0 — 12-Service ADAS Boot Image Buildfile (Vulnerable Demo)
+#
+# Planted IFS wiring flaws:
+#   1. PRE_SECPOLPUSH_LAUNCH: telemetry_svc launched before secpolpush
+#   2. UNTYPED_IFS_SERVICE:   ota_agent launched without `on -T <type>`
+#   3. UNDEFINED_IFS_TYPE:    diag_helper launched with typo `-T diag_hlpr_t`
+
+[virtual=x86_64,bios +compress] boot = {
+    startup-x86
+    PATH=/proc/boot:/bin:/usr/bin LD_LIBRARY_PATH=/proc/boot:/lib:/usr/lib procnto-smp-instr -v
+}
+
+[+script] startup-script = {
+    display_msg "Booting QNX 8.0 12-Service ADAS Image (Vulnerable Demo)..."
+    PATH=/proc/boot:/bin:/usr/bin
+    LD_LIBRARY_PATH=/proc/boot:/lib:/usr/lib
+
+    # FLAW 1: Daemon started BEFORE secpolpush (runs unconfined!)
+    telemetry_svc &
+
+    secpolpush -r /etc/secpol_ranges /etc/adas_12svc.secpol.bin
+
+    # Core & Networking
+    on -T slogger2_t -u 20:20 slogger2
+    waitfor /dev/slog2 5
+    on -T secpol_mgr_t -u 21:21 secpol_mgr &
+    on -u 22:22 -T io_sock_t io-sock
+
+    # Safety-Critical HAL
+    on -T can_hal_t -u 23:23 can_hal &
+    on -T lidar_drv_t -u 24:24 lidar_drv &
+    on -T cam_drv_t -u 25:25 cam_drv &
+
+    # Middleware
+    on -T perception_t -u 26:26 perception_svc &
+    on -T planner_t -u 27:27 planner_svc &
+
+    # FLAW 2: Daemon started after secpolpush WITHOUT `on -T`
+    ota_agent &
+
+    # FLAW 3: Typo in `-T` security type name (`diag_hlpr_t` is undeclared)
+    on -T diag_hlpr_t -u 29:29 diag_helper &
+
+    # Untrusted IVI UI
+    on -T ivi_ui_t -u 31:31 ivi_ui &
+}
+
+[type=link] /bin/sh=/proc/boot/ksh
+/etc/adas_12svc.secpol.bin=adas_12svc.secpol.bin

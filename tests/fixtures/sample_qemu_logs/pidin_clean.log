@@ -1,0 +1,16 @@
+# SYNTHETIC UNIT-TEST FIXTURE (not a real QNX kernel boot capture)
+# Clean ADAS 12-service pidin -f a_n snapshot matching examples/adas_12svc_fixed.ifs
+     pid type                 name
+       1                      procnto-smp-instr -v
+    4098 slogger2_t           /proc/boot/slogger2
+    4099 secpol_mgr_t         /proc/boot/secpol_mgr
+    4100 io_sock_t            /proc/boot/io-sock
+    4101 can_hal_t            /proc/boot/can_hal
+    4102 lidar_drv_t          /proc/boot/lidar_drv
+    4103 cam_drv_t            /proc/boot/cam_drv
+    4104 perception_t         /proc/boot/perception_svc
+    4105 planner_t            /proc/boot/planner_svc
+    4106 ota_agent_t          /proc/boot/ota_agent
+    4107 diag_helper_t        /proc/boot/diag_helper
+    4108 telemetry_t          /proc/boot/telemetry_svc
+    4109 ivi_ui_t             /proc/boot/ivi_ui
