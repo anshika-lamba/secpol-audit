@@ -2,8 +2,10 @@
  * can_server.c — QNX Neutrino 8.0 Safety-Critical CAN HAL Server
  *
  * Launched via `on -T can_hal_t /proc/boot/can_server`.
- * Registers the global namespace channel `can_ctrl` using `name_attach(NULL, "can_ctrl", 0)`
- * and replies "CAN_CTRL_GRANTED" to any client permitted by the QNX 8.0 security policy.
+ * Registers the local namespace channel `can_ctrl` via `name_attach(NULL, "can_ctrl", 0)`,
+ * which attaches at `/dev/name/local/can_ctrl` (matching `allow_attach can_hal_t /dev/name/local/can_ctrl;`
+ * plus `pathspace` and `public_channel` abilities in the .secpol policy).
+ * Replies "CAN_CTRL_GRANTED" to any client permitted by the QNX 8.0 security policy.
  */
 
 #include <errno.h>

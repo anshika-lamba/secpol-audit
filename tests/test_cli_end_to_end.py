@@ -74,6 +74,7 @@ def test_cli_check_secpolcompile_fail_causes_exit_1(tmp_path: Path, capsys) -> N
 
 def test_cli_paths_generates_offline_html_and_exits_1(tmp_path: Path, capsys) -> None:
     html_file = tmp_path / "adas_report.html"
+    svg_file = tmp_path / "adas_preview.svg"
     rc = main(
         [
             "paths",
@@ -82,6 +83,8 @@ def test_cli_paths_generates_offline_html_and_exits_1(tmp_path: Path, capsys) ->
             str(REPO_ROOT / "examples/adas_12svc.ifs"),
             "--html",
             str(html_file),
+            "--svg",
+            str(svg_file),
         ]
     )
     assert rc == 1
@@ -92,6 +95,18 @@ def test_cli_paths_generates_offline_html_and_exits_1(tmp_path: Path, capsys) ->
     assert "ivi_ui_t -> diag_helper_t -> can_hal_t" in content
     assert "http://" not in content
     assert "https://" not in content
+    assert svg_file.is_file()
+    assert "Hop 1: settypeid" in svg_file.read_text(encoding="utf-8")
+
+
+def test_cli_circular_include_exits_2(tmp_path: Path, capsys) -> None:
+    a = tmp_path / "a.secpol"
+    b = tmp_path / "b.secpol"
+    a.write_text('include "b.secpol";\n', encoding="utf-8")
+    b.write_text('include "a.secpol";\n', encoding="utf-8")
+    rc = main(["check", str(a)])
+    assert rc == 2
+    assert "Circular include" in capsys.readouterr().err
 
 
 def test_cli_paths_fixed_exits_0(capsys) -> None:

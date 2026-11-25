@@ -45,6 +45,8 @@ SENSITIVE_UNLOCK_ABILITIES = frozenset(
 
 DEFAULT_PRIVILEGED_ATTACH_PATTERNS = (
     "/dev/can_ctrl",
+    "/dev/name/local/can_ctrl",
+    "/dev/name/global/can_ctrl",
     "/dev/mem",
     "/dev/io*",
     "/system",

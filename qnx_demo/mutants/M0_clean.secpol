@@ -14,16 +14,19 @@ allow_attach slogger2_t /dev/slog2;
 allow slogger2_t self:ability {
     nonroot
     pathspace
+    public_channel
 };
 
-allow_attach can_hal_t /dev/can_ctrl;
+# name_attach(NULL, "can_ctrl", 0) registers at /dev/name/local/can_ctrl
+allow_attach can_hal_t /dev/name/local/can_ctrl;
 allow can_hal_t self:ability {
     nonroot
     mem_phys:0xfe000000-0xfe010000
     io
     pathspace
+    public_channel
 };
-allow can_hal_t can_hal_t : channel connect;
+allow can_hal_t self : channel connect;
 
 allow planner_t can_hal_t : channel connect;
 allow_attach diag_helper_t /dev/diag;

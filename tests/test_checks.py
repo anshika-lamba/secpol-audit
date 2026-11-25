@@ -165,3 +165,11 @@ def test_all_qnx_demo_mutants_static_predictions() -> None:
     assert m3_fixed_f == []
     assert m3_fixed_p.escalation_paths == []
 
+    # Verify all mutant .secpol files align with name_attach(NULL, "can_ctrl", 0) -> /dev/name/local/can_ctrl
+    for name in ("M0_clean.secpol", "M1_no_connect.secpol", "M3_2hop_escalate.secpol", "M3_fixed.secpol"):
+        pol = parse_secpol_file(REPO_ROOT / "qnx_demo/mutants" / name)
+        can_attaches = [ap.path for r in pol.attach_rules if "can_hal_t" in r.types for ap in r.paths]
+        assert "/dev/name/local/can_ctrl" in can_attaches
+        assert any("can_hal_t" in r.sources and "self" in r.targets for r in pol.connect_rules)
+
+
