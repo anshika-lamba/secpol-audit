@@ -1,0 +1,96 @@
+# QNX Neutrino 8.0 — 12-Service ADAS Security Policy (Hardened / Fixed)
+#
+# Remediations applied vs. examples/adas_12svc.secpol:
+#   - Removed `settypeid:diag_helper_t` from `ivi_ui_t`
+#   - Removed `settypeid:can_hal_t` from `diag_helper_t`
+#   - Retained read-only IPC `allow ivi_ui_t diag_helper_t : channel connect;`
+#   - Result: 0 transitive privilege escalation chains, 0 policy findings.
+
+attribute net_client_a;
+attribute sensor_drv_a;
+
+# --- Core / System ---
+type slogger2_t;
+type secpol_mgr_t;
+
+# --- Safety-Critical HAL ---
+type can_hal_t;
+type lidar_drv_t, sensor_drv_a;
+type cam_drv_t, sensor_drv_a;
+
+# --- Middleware ---
+type io_sock_t;
+type perception_t;
+type planner_t;
+type ota_agent_t, net_client_a;
+type diag_helper_t;
+type telemetry_t, net_client_a;
+
+# --- Untrusted / Edge ---
+type ivi_ui_t, net_client_a;
+
+mount_point 0:0 { u::rwx g::rx o::rx } /dev;
+mount_point 0:0 0755 /tmp;
+
+allow default_rules slogger2_t : channel connect;
+
+# --- Core / System rules ---
+allow_attach slogger2_t /dev/slog2;
+allow slogger2_t self:ability {
+    nonroot
+    pathspace
+};
+
+allow_attach secpol_mgr_t /dev/secpol_mgmt;
+allow secpol_mgr_t self:ability {
+    mac_policy
+    pathspace
+};
+
+# --- Safety-Critical HAL rules ---
+allow_attach can_hal_t /dev/can_ctrl;
+allow can_hal_t self:ability {
+    nonroot
+    mem_phys:0xfe000000-0xfe010000
+    io
+    pathspace
+};
+
+allow_attach lidar_drv_t /dev/lidar0;
+allow lidar_drv_t self:ability {
+    nonroot
+    mem_phys:0xfd000000-0xfd100000
+    pathspace
+};
+
+allow_attach cam_drv_t /dev/cam0;
+allow cam_drv_t self:ability {
+    nonroot
+    mem_phys:0xfc000000-0xfc100000
+    pathspace
+};
+
+# --- Middleware rules ---
+allow_attach io_sock_t /dev/socket;
+allow io_sock_t self:ability {
+    nonroot
+    able_create
+};
+allow net_client_a io_sock_t : channel connect;
+
+allow_attach perception_t /dev/perception;
+allow perception_t sensor_drv_a : channel connect;
+
+allow_attach planner_t /dev/planner;
+allow planner_t { perception_t can_hal_t } : channel connect;
+
+allow ota_agent_t secpol_mgr_t : channel connect;
+allow_link ota_agent_t /dev/secpol_mgmt;
+
+allow telemetry_t planner_t : channel connect;
+
+# --- Hardened diagnostic helper & IVI UI (zero settypeid transitions) ---
+allow_attach diag_helper_t /dev/diag;
+allow diag_helper_t slogger2_t : channel connect;
+
+allow ivi_ui_t diag_helper_t : channel connect;

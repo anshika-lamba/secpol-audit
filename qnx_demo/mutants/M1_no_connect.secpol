@@ -1,0 +1,38 @@
+# Mutant M1_no_connect: ivi_ui_t can spawn diag_helper_t, but diag_helper_t has
+# neither settypeid:can_hal_t nor channel connect to can_hal_t.
+# Static prediction: 0 escalation chains (diag_helper_t is NOT a high-privilege sink)
+# Runtime prediction: DIRECT_RESULT=DENIED, HOP1_SPAWN=OK, HOP2_TRANSITION=DENIED, HOP2_RESULT=DENIED
+
+type slogger2_t;
+type can_hal_t;
+type planner_t;
+type diag_helper_t;
+type ivi_ui_t;
+
+allow default_rules slogger2_t : channel connect;
+
+allow_attach slogger2_t /dev/slog2;
+allow slogger2_t self:ability {
+    nonroot
+    pathspace
+};
+
+allow_attach can_hal_t /dev/can_ctrl;
+allow can_hal_t self:ability {
+    nonroot
+    mem_phys:0xfe000000-0xfe010000
+    io
+    pathspace
+};
+allow can_hal_t can_hal_t : channel connect;
+
+allow planner_t can_hal_t : channel connect;
+
+allow_attach diag_helper_t /dev/diag;
+allow diag_helper_t slogger2_t : channel connect;
+
+allow ivi_ui_t diag_helper_t : channel connect;
+allow ivi_ui_t self:ability {
+    nonroot
+    settypeid:diag_helper_t
+};

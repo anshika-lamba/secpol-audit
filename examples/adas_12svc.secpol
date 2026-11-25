@@ -1,0 +1,110 @@
+# QNX Neutrino 8.0 — 12-Service ADAS Security Policy (Vulnerable Demo)
+#
+# Planted flaw in this policy:
+#   2-hop privilege escalation chain:
+#     ivi_ui_t -> diag_helper_t -> can_hal_t (holds mem_phys, io, /dev/can_ctrl)
+#
+# Paired with examples/adas_12svc.ifs which contains 3 IFS wiring flaws:
+#   1. Pre-secpolpush launch (telemetry_svc)
+#   2. Untyped daemon after secpolpush (ota_agent)
+#   3. Undefined -T typo (diag_hlpr_t)
+
+attribute net_client_a;
+attribute sensor_drv_a;
+
+# --- Core / System ---
+type slogger2_t;
+type secpol_mgr_t;
+
+# --- Safety-Critical HAL ---
+type can_hal_t;
+type lidar_drv_t, sensor_drv_a;
+type cam_drv_t, sensor_drv_a;
+
+# --- Middleware ---
+type io_sock_t;
+type perception_t;
+type planner_t;
+type ota_agent_t, net_client_a;
+type diag_helper_t;
+type telemetry_t, net_client_a;
+
+# --- Untrusted / Edge ---
+type ivi_ui_t, net_client_a;
+
+# Mount points (standard QNX 8.0 policy syntax)
+mount_point 0:0 { u::rwx g::rx o::rx } /dev;
+mount_point 0:0 0755 /tmp;
+
+# Default rule: every active type with an allow rule may log to slogger2_t
+allow default_rules slogger2_t : channel connect;
+
+# --- Core / System rules ---
+allow_attach slogger2_t /dev/slog2;
+allow slogger2_t self:ability {
+    nonroot
+    pathspace
+};
+
+allow_attach secpol_mgr_t /dev/secpol_mgmt;
+allow secpol_mgr_t self:ability {
+    mac_policy
+    pathspace
+};
+
+# --- Safety-Critical HAL rules ---
+allow_attach can_hal_t /dev/can_ctrl;
+allow can_hal_t self:ability {
+    nonroot
+    mem_phys:0xfe000000-0xfe010000
+    io
+    pathspace
+};
+
+allow_attach lidar_drv_t /dev/lidar0;
+allow lidar_drv_t self:ability {
+    nonroot
+    mem_phys:0xfd000000-0xfd100000
+    pathspace
+};
+
+allow_attach cam_drv_t /dev/cam0;
+allow cam_drv_t self:ability {
+    nonroot
+    mem_phys:0xfc000000-0xfc100000
+    pathspace
+};
+
+# --- Middleware rules ---
+allow_attach io_sock_t /dev/socket;
+allow io_sock_t self:ability {
+    nonroot
+    able_create
+};
+allow net_client_a io_sock_t : channel connect;
+
+allow_attach perception_t /dev/perception;
+allow perception_t sensor_drv_a : channel connect;
+
+allow_attach planner_t /dev/planner;
+allow planner_t { perception_t can_hal_t } : channel connect;
+
+allow ota_agent_t secpol_mgr_t : channel connect;
+allow_link ota_agent_t /dev/secpol_mgmt;
+
+allow telemetry_t planner_t : channel connect;
+
+# --- VULNERABLE 2-HOP ESCALATION CHAIN ---
+# Hop 2: diagnostic helper can transition into safety-critical can_hal_t!
+allow_attach diag_helper_t /dev/diag;
+allow diag_helper_t self:ability {
+    nonroot
+    settypeid:can_hal_t
+};
+
+# Hop 1: untrusted IVI infotainment UI can spawn/transition into diag_helper_t!
+allow ivi_ui_t diag_helper_t : channel connect;
+allow ivi_ui_t self:ability {
+    nonroot
+    settypeid:diag_helper_t
+};

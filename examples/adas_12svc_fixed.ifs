@@ -1,0 +1,43 @@
+# QNX Neutrino 8.0 — 12-Service ADAS Boot Image Buildfile (Hardened / Fixed)
+#
+# Remediations applied vs. examples/adas_12svc.ifs:
+#   1. Moved `telemetry_svc` AFTER `secpolpush` with `on -T telemetry_t`
+#   2. Launched `ota_agent` with `on -T ota_agent_t`
+#   3. Fixed typo `-T diag_hlpr_t` -> `-T diag_helper_t`
+
+[virtual=x86_64,bios +compress] boot = {
+    startup-x86
+    PATH=/proc/boot:/bin:/usr/bin LD_LIBRARY_PATH=/proc/boot:/lib:/usr/lib procnto-smp-instr -v
+}
+
+[+script] startup-script = {
+    display_msg "Booting QNX 8.0 12-Service ADAS Image (Hardened)..."
+    PATH=/proc/boot:/bin:/usr/bin
+    LD_LIBRARY_PATH=/proc/boot:/lib:/usr/lib
+
+    secpolpush -r /etc/secpol_ranges /etc/adas_12svc_fixed.secpol.bin
+
+    # Core & Networking
+    on -T slogger2_t -u 20:20 slogger2
+    waitfor /dev/slog2 5
+    on -T secpol_mgr_t -u 21:21 secpol_mgr &
+    on -u 22:22 -T io_sock_t io-sock
+
+    # Safety-Critical HAL
+    on -T can_hal_t -u 23:23 can_hal &
+    on -T lidar_drv_t -u 24:24 lidar_drv &
+    on -T cam_drv_t -u 25:25 cam_drv &
+
+    # Middleware
+    on -T perception_t -u 26:26 perception_svc &
+    on -T planner_t -u 27:27 planner_svc &
+    on -T ota_agent_t -u 28:28 ota_agent &
+    on -T diag_helper_t -u 29:29 diag_helper &
+    on -T telemetry_t -u 30:30 telemetry_svc &
+
+    # Untrusted IVI UI
+    on -T ivi_ui_t -u 31:31 ivi_ui &
+}
+
+[type=link] /bin/sh=/proc/boot/ksh
+/etc/adas_12svc_fixed.secpol.bin=adas_12svc_fixed.secpol.bin
