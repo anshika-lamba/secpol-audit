@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test-and-verify:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.12"]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install secpol-audit with dev dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Run full pytest suite
+        run: pytest -v
+
+      - name: Verify 5/5 MATCH on real QNX 8.0 QEMU logs
+        run: |
+          output="$(make verify-offline)"
+          echo "$output"
+          match_count="$(echo "$output" | grep -c '| MATCH$')"
+          test "$match_count" -eq 5
+          ! echo "$output" | grep -qE 'MISMATCH|SKIPPED'
+
+      - name: Verify 5/5 MATCH on synthetic unit-test fixtures
+        run: |
+          output="$(make verify-fixtures)"
+          echo "$output"
+          match_count="$(echo "$output" | grep -c '| MATCH (fixture)$')"
+          test "$match_count" -eq 5
+          ! echo "$output" | grep -qE 'MISMATCH|SKIPPED'
+
+      - name: CLI smoke-test (fixed ADAS exit 0 + SARIF 2.1.0 validation)
+        run: |
+          secpol-audit check examples/adas_12svc_fixed.secpol --ifs examples/adas_12svc_fixed.ifs
+
+          set +e
+          secpol-audit check examples/adas_12svc.secpol --ifs examples/adas_12svc.ifs --format sarif > /tmp/adas.sarif.json
+          rc=$?
+          set -e
+          test "$rc" -eq 1
+
+          python3 - <<'PY'
+          import json
+          doc = json.load(open("/tmp/adas.sarif.json", encoding="utf-8"))
+          assert doc["version"] == "2.1.0"
+          assert len(doc["runs"]) == 1
+          results = doc["runs"][0]["results"]
+          rule_ids = {r["ruleId"] for r in results}
+          assert {
+              "ESCALATION_CHAIN",
+              "PRE_SECPOLPUSH_LAUNCH",
+              "UNTYPED_IFS_SERVICE",
+              "UNDEFINED_IFS_TYPE",
+          }.issubset(rule_ids)
+          print(f"SARIF 2.1.0 smoke-test passed ({len(results)} results)")
+          PY

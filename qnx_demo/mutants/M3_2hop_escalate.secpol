@@ -1,7 +1,7 @@
 # Mutant M3_2hop_escalate: Vulnerable 2-hop privilege escalation chain
 #   ivi_ui_t -> diag_helper_t -> can_hal_t (mem_phys, io, /dev/name/local/can_ctrl)
 # Static prediction: CRITICAL ESCALATION_CHAIN (2-hop: ivi_ui_t -> diag_helper_t -> can_hal_t)
-# Runtime prediction: DIRECT_RESULT=DENIED, HOP1_SPAWN=OK, HOP2_TRANSITION=OK, HOP2_RESULT=GRANTED
+# Runtime prediction: DIRECT_RESULT=DENIED, HOP1_SPAWN=OK, HOP2_SPAWN=OK, HOP2_RESULT=GRANTED coid=...
 
 type slogger2_t;
 type can_hal_t;

@@ -94,13 +94,56 @@ def test_harness_observe_serial_fixtures() -> None:
     assert obs_m3.direct_result == "DENIED"
     assert obs_m3.direct_errno == 1
     assert obs_m3.hop1_spawn == "OK"
+    assert obs_m3.hop1_child_pid == 4106
     assert obs_m3.hop2_transition == "OK"
     assert obs_m3.hop2_result == "GRANTED"
+    assert obs_m3.hop2_reply == "CAN_CTRL_GRANTED"
     assert len(obs_m3.pidin_processes) == 3
     assert obs_m3.completed is True
 
     obs_m2 = observe_serial_file(FIXTURES / "M2_untyped_server.log")
     assert any(p.name == "can_server" and p.secpol_type is None for p in obs_m2.pidin_processes)
+
+
+def test_harness_observe_real_qnx8_qemu_logs() -> None:
+    real_dir = REPO_ROOT / "evidence/qemu_logs"
+
+    m1 = observe_serial_file(real_dir / "M1_no_connect.log")
+    assert m1.is_synthetic_fixture is False
+    assert m1.mutant == "M1_no_connect"
+    assert m1.direct_result == "DENIED"
+    assert m1.direct_errno == 1
+    assert m1.hop1_spawn == "OK"
+    assert m1.hop1_child_pid == 16388
+    assert m1.hop2_spawn == "DENIED"
+    assert m1.hop2_spawn_errno == 1
+    assert m1.hop2_result is None
+    assert m1.completed is True
+
+    m2 = observe_serial_file(real_dir / "M2_untyped_server.log")
+    assert m2.is_synthetic_fixture is False
+    assert m2.mutant == "M2_untyped_server"
+    assert m2.direct_result == "DENIED"
+    assert m2.direct_errno == 2
+    assert m2.hop1_spawn == "DENIED"
+    assert m2.hop1_errno == 1
+    assert any(p.pid == 4098 and p.name == "can_server" and p.secpol_type is None for p in m2.pidin_processes)
+    assert m2.completed is True
+
+    m3 = observe_serial_file(real_dir / "M3_2hop_escalate.log")
+    assert m3.is_synthetic_fixture is False
+    assert m3.mutant == "M3_2hop_escalate"
+    assert m3.direct_result == "DENIED"
+    assert m3.direct_errno == 1
+    assert m3.hop1_spawn == "OK"
+    assert m3.hop1_child_pid == 16388
+    assert m3.hop2_spawn == "OK"
+    assert m3.hop2_child_pid == 16389
+    assert m3.hop2_probe_pid == 16389
+    assert m3.hop2_result == "GRANTED"
+    assert m3.hop2_coid == 1073741825
+    assert any(p.pid == 4098 and p.name == "can_server" and p.secpol_type == "can_hal_t" for p in m3.pidin_processes)
+    assert m3.completed is True
 
 
 def test_parse_pidin_flexible_headers_reversed_order_overflow_and_paths() -> None:
