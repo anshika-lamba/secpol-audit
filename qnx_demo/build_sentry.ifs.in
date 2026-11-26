@@ -26,7 +26,7 @@
     on -T audit_reader_t -u 26:26 /proc/boot/secpol_sentry -r SENTRY_READ_AUTH
     on -T ivi_ui_t -u 31:31 /proc/boot/secpol_sentry -r SENTRY_READ_UNAUTH
 
-    sleep 7
+    waitfor /dev/secpol_sentry_done 8
     display_msg "=== SECPOL_AUDIT_DONE ==="
 }
 
@@ -40,7 +40,6 @@ libsecpolev.so
 /proc/boot/secpolpush=secpolpush
 /proc/boot/on=on
 /proc/boot/pidin=pidin
-/proc/boot/sleep=sleep
 /proc/boot/secpol_sentry=build/secpol_sentry
 /proc/boot/can_server=build/can_server
 /proc/boot/diag_helper=build/diag_helper
