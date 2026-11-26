@@ -14,23 +14,26 @@
  *   qcc -Vgcc_ntox86_64 -Wall -Wextra -O2 -o build/secpol_sentry secpol_sentry.c -lsecpolev -lsecpol
  *
  * Usage:
- *   on -T secpol_sentry_t -u 25:25 /proc/boot/secpol_sentry [-t <seconds>]
+ *   Daemon mode: on -T secpol_sentry_t -u 25:25 /proc/boot/secpol_sentry [-t <seconds>]
+ *   Probe mode:  on -T audit_reader_t  -u 26:26 /proc/boot/secpol_sentry -r SENTRY_READ_AUTH
  */
 
 #include <errno.h>
+#include <fcntl.h>
 #include <inttypes.h>
 #include <pthread.h>
-#include <secpol/secpol.h>
-#include <secpol/secpolev.h>
 #include <signal.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/dispatch.h>
+/* Include <sys/iofunc.h> before <sys/dispatch.h> and <secpol/secpol.h> so QNX sets RESMGR_OCB_T/RESMGR_HANDLE_T */
 #include <sys/iofunc.h>
+#include <sys/dispatch.h>
 #include <sys/neutrino.h>
+#include <secpol/secpol.h>
+#include <secpol/secpolev.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -75,7 +78,7 @@ static volatile sig_atomic_t g_stop = 0;
 static bool g_secpolev_initialized = false;
 static bool g_secpolev_shutdown_done = false;
 static pthread_mutex_t g_shutdown_lock = PTHREAD_MUTEX_INITIALIZER;
-static secpol_perm_t g_read_perm = (secpol_perm_t)0;
+static secpol_permission_t *g_read_perm = NULL;
 static int g_self_coid = -1;
 static int g_timeout_sec = 0;
 
@@ -118,6 +121,21 @@ static void json_escape(const char *src, char *dst, size_t dst_size) {
         }
     }
     dst[j] = '\0';
+}
+
+static const char *path_status_to_str(secpolev_path_event_status_t status) {
+    switch (status) {
+        case SECPOLEV_PATH_EVENT_OK:
+            return "ok";
+        case SECPOLEV_PATH_EVENT_CONFLICT:
+            return "conflict";
+        case SECPOLEV_PATH_EVENT_BAD_OP:
+            return "bad_op";
+        case SECPOLEV_PATH_EVENT_NO_RULE:
+            return "no_rule";
+        default:
+            return "unknown";
+    }
 }
 
 static uint64_t monotonic_now_ns(void) {
@@ -212,7 +230,7 @@ static void emit_multihop_alert_locked(uint64_t ts_ns) {
     size_t pos = 0;
     int n = snprintf(alert_buf, sizeof(alert_buf),
                      "SECPOLEV_ALERT:{\"kind\":\"multi_hop_chain\",\"chain\":[");
-    if (n > 0) {
+    if (n > 0 && (size_t)n < sizeof(alert_buf)) {
         pos = (size_t)n;
     }
     for (size_t i = 0; i < g_state.hop_chain_len && pos + 8 < sizeof(alert_buf); ++i) {
@@ -220,7 +238,7 @@ static void emit_multihop_alert_locked(uint64_t ts_ns) {
         json_escape(g_state.hop_chain[i], esc, sizeof(esc));
         n = snprintf(alert_buf + pos, sizeof(alert_buf) - pos,
                      "%s\"%s\"", (i > 0) ? "," : "", esc);
-        if (n > 0) {
+        if (n > 0 && (size_t)n < sizeof(alert_buf) - pos) {
             pos += (size_t)n;
         }
     }
@@ -306,17 +324,17 @@ static void *secpolev_collector_thread(void *arg) {
     while (!g_stop) {
         unsigned flags = 0;
         int ev = secpolev_wait_event(&flags);
-        if (ev < 0) {
+        if (ev < 0 || ev == SECPOLEV_EVENT_END) {
+            break;
+        }
+        if (ev == SECPOLEV_EVENT_ERROR) {
             if (errno == EINTR && !g_stop) {
                 continue;
             }
             break;
         }
-        if (ev == SECPOLEV_EVENT_NONE) {
-            continue;
-        }
 
-        bool denied = (flags & SECPOL_EVENT_FLAG_DENIED) != 0;
+        bool denied = (flags & SECPOL_EVENT_FLAG_DENIED) != 0u;
         const char *verdict = denied ? "DENIED" : "OK";
         const char *proc_raw = secpolev_get_process_name();
         const char *type_raw = secpolev_get_process_type();
@@ -341,20 +359,34 @@ static void *secpolev_collector_thread(void *arg) {
         switch (ev) {
             case SECPOLEV_EVENT_ABILITY_TEST: {
                 kind = "ability";
-                int rc = secpolev_get_ability_info(&ability_raw, &is_root, &range_start, &range_end);
-                if (rc > 0 || (rc == 0 && (range_start != 0 || (range_end != 0 && range_end != UINT64_MAX)))) {
-                    has_range = true;
+                unsigned ability_id = 0;
+                unsigned able_flags = 0;
+                if (secpolev_get_ability_info(
+                        &ability_id,
+                        &ability_raw,
+                        &able_flags,
+                        &range_start,
+                        &range_end) >= 0) {
+                    is_root = (able_flags & SECPOLEV_ABILITY_ROOT) != 0u;
+                    has_range = (able_flags & SECPOLEV_ABILITY_RANGED) != 0u;
                 }
+                (void)ability_id;
                 break;
             }
             case SECPOLEV_EVENT_PATH_ATTACH: {
                 kind = "attach";
-                (void)secpolev_get_path_info(&path_raw, &status_raw);
+                secpolev_path_event_status_t path_status = SECPOLEV_PATH_EVENT_OK;
+                if (secpolev_get_path_info(&path_raw, &path_status) >= 0) {
+                    status_raw = path_status_to_str(path_status);
+                }
                 break;
             }
             case SECPOLEV_EVENT_PATH_LINK: {
                 kind = "link";
-                (void)secpolev_get_path_info(&path_raw, &status_raw);
+                secpolev_path_event_status_t path_status = SECPOLEV_PATH_EVENT_OK;
+                if (secpolev_get_path_info(&path_raw, &path_status) >= 0) {
+                    status_raw = path_status_to_str(path_status);
+                }
                 break;
             }
             case SECPOLEV_EVENT_CUSTOM_PERM: {
@@ -451,7 +483,9 @@ static size_t build_sentry_summary_json(char *buf, size_t buf_size) {
     size_t pos = 0;
     pthread_mutex_lock(&g_state.lock);
 
-    unsigned long long dropped = (unsigned long long)secpolev_get_dropped_count();
+    unsigned long long dropped = g_secpolev_initialized
+                                     ? (unsigned long long)secpolev_get_dropped_count()
+                                     : 0ULL;
     int n = snprintf(
         buf + pos, buf_size - pos,
         "{\"ok\":%" PRIu64 ",\"denied\":%" PRIu64 ",\"alerts\":%" PRIu64
@@ -461,7 +495,7 @@ static size_t build_sentry_summary_json(char *buf, size_t buf_size) {
         g_state.total_alerts,
         dropped
     );
-    if (n > 0) {
+    if (n > 0 && (size_t)n < buf_size) {
         pos += (size_t)n;
     }
 
@@ -480,14 +514,14 @@ static size_t build_sentry_summary_json(char *buf, size_t buf_size) {
             break;
         }
         n = snprintf(buf + pos, buf_size - pos, "%s%s", (i > 0) ? "," : "", g_state.ring[idx]);
-        if (n > 0) {
+        if (n > 0 && (size_t)n < buf_size - pos) {
             pos += (size_t)n;
         }
     }
 
     if (pos + 4 < buf_size) {
         n = snprintf(buf + pos, buf_size - pos, "]}\n");
-        if (n > 0) {
+        if (n > 0 && (size_t)n < buf_size - pos) {
             pos += (size_t)n;
         }
     }
@@ -496,7 +530,8 @@ static size_t build_sentry_summary_json(char *buf, size_t buf_size) {
     return pos;
 }
 
-static int sentry_io_read(resmgr_context_t *ctp, io_read_t *msg, RESMGR_OCB_T *ocb) {
+static int sentry_io_read(resmgr_context_t *ctp, io_read_t *msg, RESMGR_OCB_T *ctp_ocb) {
+    iofunc_ocb_t *ocb = (iofunc_ocb_t *)ctp_ocb;
     int status;
     int nonblock = 0;
 
@@ -511,8 +546,8 @@ static int sentry_io_read(resmgr_context_t *ctp, io_read_t *msg, RESMGR_OCB_T *o
     if (MsgInfo(ctp->rcvid, &ctp->info) == -1) {
         return EACCES;
     }
-    if (g_read_perm == (secpol_perm_t)0 ||
-        !secpol_check_permission(&ctp->info, secpol_type_id(), g_read_perm)) {
+    if (g_read_perm == NULL ||
+        secpol_check_permission(&ctp->info, secpol_type_id(), g_read_perm) != 1) {
         return EACCES;
     }
 
@@ -525,7 +560,8 @@ static int sentry_io_read(resmgr_context_t *ctp, io_read_t *msg, RESMGR_OCB_T *o
     }
 
     size_t remaining = total_len - (size_t)ocb->offset;
-    size_t nbytes = (msg->i.nbytes < remaining) ? (size_t)msg->i.nbytes : remaining;
+    size_t req_bytes = (size_t)msg->i.nbytes;
+    size_t nbytes = (req_bytes < remaining) ? req_bytes : remaining;
 
     if (MsgReply(ctp->rcvid, (int)nbytes, payload + ocb->offset, nbytes) == -1) {
         return errno;
@@ -534,9 +570,31 @@ static int sentry_io_read(resmgr_context_t *ctp, io_read_t *msg, RESMGR_OCB_T *o
     return _RESMGR_NOREPLY;
 }
 
+/* Built-in probe mode (`-r <label>`) so IFS scripts can verify custom-class access without ksh/cat */
+static int run_read_probe(const char *label) {
+    int fd = open(SENTRY_DEV_PATH, O_RDONLY);
+    if (fd == -1) {
+        printf("%s=DENIED errno=%d\n", label, errno);
+        fflush(stdout);
+        return EXIT_SUCCESS;
+    }
+    char buf[512];
+    ssize_t n = read(fd, buf, sizeof(buf) - 1);
+    int saved_errno = errno;
+    close(fd);
+    if (n > 0) {
+        printf("%s=OK bytes=%zd\n", label, n);
+    } else {
+        printf("%s=DENIED errno=%d\n", label, saved_errno);
+    }
+    fflush(stdout);
+    return EXIT_SUCCESS;
+}
+
 int main(int argc, char *argv[]) {
+    const char *probe_label = NULL;
     int opt;
-    while ((opt = getopt(argc, argv, "t:")) != -1) {
+    while ((opt = getopt(argc, argv, "t:r:")) != -1) {
         switch (opt) {
             case 't':
                 g_timeout_sec = atoi(optarg);
@@ -544,10 +602,17 @@ int main(int argc, char *argv[]) {
                     g_timeout_sec = 0;
                 }
                 break;
+            case 'r':
+                probe_label = optarg;
+                break;
             default:
-                fprintf(stderr, "Usage: %s [-t <seconds>]\n", argv[0]);
+                fprintf(stderr, "Usage: %s [-t <seconds>] [-r <probe_label>]\n", argv[0]);
                 return EXIT_FAILURE;
         }
+    }
+
+    if (probe_label != NULL) {
+        return run_read_probe(probe_label);
     }
 
     memset(&g_state, 0, sizeof(g_state));
@@ -561,7 +626,7 @@ int main(int argc, char *argv[]) {
 
     /* Resolve custom permission handle: `class sentry { read_events };` */
     g_read_perm = secpol_get_permission(NULL, SENTRY_CLASS_NAME, SENTRY_PERM_READ, 0);
-    if (g_read_perm == (secpol_perm_t)0) {
+    if (g_read_perm == NULL) {
         fprintf(stderr, "SENTRY_PERM_INIT=FAILED class=%s perm=%s errno=%d (%s)\n",
                 SENTRY_CLASS_NAME, SENTRY_PERM_READ, errno, strerror(errno));
         fflush(stderr);
@@ -648,7 +713,9 @@ int main(int argc, char *argv[]) {
         pthread_join(timer_tid, NULL);
     }
 
-    unsigned long long dropped = (unsigned long long)secpolev_get_dropped_count();
+    unsigned long long dropped = g_secpolev_initialized
+                                     ? (unsigned long long)secpolev_get_dropped_count()
+                                     : 0ULL;
     pthread_mutex_lock(&g_state.lock);
     uint64_t final_ok = g_state.total_ok;
     uint64_t final_denied = g_state.total_denied;
