@@ -31,7 +31,7 @@ jobs:
           if [ -n "$MYQNX_LICENSE_KEY" ]; then
             "$CLT" -myqnx.user "$MYQNX_USER" -myqnx.password "$MYQNX_PASSWORD" -activateLicenseKey "$MYQNX_LICENSE_KEY" || true
           fi
-          "$CLT" -myqnx.user "$MYQNX_USER" -myqnx.password "$MYQNX_PASSWORD" -mirrorBaseline com.qnx.qnx800
+          "$CLT" -myqnx.user "$MYQNX_USER" -myqnx.password "$MYQNX_PASSWORD" -mirror
           for attempt in 1 2; do
             if "$CLT" -myqnx.user "$MYQNX_USER" -myqnx.password "$MYQNX_PASSWORD" \
               -installBaseline com.qnx.qnx800 -destination /tmp/qnx800 -cleanInstall; then
