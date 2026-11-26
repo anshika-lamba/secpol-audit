@@ -38,7 +38,6 @@ allow planner_t can_hal_t : channel connect;
 
 # Hop 2: diag_helper_t can transition into can_hal_t
 allow_attach diag_helper_t /dev/diag;
-allow diag_helper_t slogger2_t : channel connect;
 allow diag_helper_t self:ability {
     nonroot
     settypeid:can_hal_t
