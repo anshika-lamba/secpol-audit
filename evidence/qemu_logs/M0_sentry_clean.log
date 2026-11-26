@@ -1,0 +1,256 @@
+c[?7l[2J[0mSeaBIOS (version 1.17.0-debian-1.17.0-1ubuntu1)
+
+
+iPXE (https://ipxe.org) 00:03.0 CA00 PCI2.10 PnP PMM+1EFC8CA0+1EF08CA0 CA00
+Press Ctrl-B to configure iPXE (PCI 00:03.0)...                                                                               
+
+
+Booting from ROM..
+non UEFI or UEFI+CSM boot
+ACPI table not found (0x4746434d)
+System behaves poorly without PCID support.
+overriding mask for controller 2, vector_base 0
+=== SECPOL_AUDIT_MUTANT=M0_sentry_clean ===
+SENTRY_READY pid=4098 path=/dev/secpol_sentry
+SECPOLEV_READY pid=4098
+CAN_SERVER_READY pid=8195 path=/dev/name/local/can_ctrl
+=== PIDIN_BEGIN ===
+     pid type             name                                                                             
+       1 -                /proc/boot/procnto-smp-instr                                                     
+    4098 secpol_sentry_t  proc/boot/secpol_sentry                                                          
+    8195 can_hal_t        proc/boot/can_server                                                             
+   12292 -                proc/boot/pidin                                                                  
+=== PIDIN_END ===
+IVI_EXPLOIT_START pid=16388
+DIRECT_RESULT=DENIED errno=1 (Operation not permitted)
+HOP1_SPAWN=DENIED errno=1 (Operation not permitted)
+SENTRY_READ_AUTH=OK bytes=62
+SENTRY_READ_UNAUTH=DENIED errno=13
+SECPOLEV_JSON:{"ts_ns":152584329,"verdict":"OK","proc":"proc/boot/on","type":"-","kind":"ability","ability":"map_fixed","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":152915943,"verdict":"OK","proc":"proc/boot/on","type":"-","kind":"ability","ability":"prot_exec","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":153376498,"verdict":"OK","proc":"proc/boot/on","type":"-","kind":"ability","ability":"map_fixed","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":153469235,"verdict":"OK","proc":"proc/boot/on","type":"-","kind":"ability","ability":"map_fixed","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":153624122,"verdict":"OK","proc":"proc/boot/on","type":"-","kind":"ability","ability":"map_fixed","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":154448181,"verdict":"OK","proc":"proc/boot/on","type":"-","kind":"ability","ability":"map_fixed","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":154453063,"verdict":"OK","proc":"proc/boot/on","type":"-","kind":"ability","ability":"prot_exec","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":154512323,"verdict":"OK","proc":"proc/boot/on","type":"-","kind":"ability","ability":"map_fixed","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":154579032,"verdict":"OK","proc":"proc/boot/on","type":"-","kind":"ability","ability":"map_fixed","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":156595841,"verdict":"OK","proc":"proc/boot/on","type":"-","kind":"ability","ability":"map_fixed","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":156600404,"verdict":"OK","proc":"proc/boot/on","type":"-","kind":"ability","ability":"prot_exec","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":156655170,"verdict":"OK","proc":"proc/boot/on","type":"-","kind":"ability","ability":"map_fixed","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":156730469,"verdict":"OK","proc":"proc/boot/on","type":"-","kind":"ability","ability":"map_fixed","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":157968155,"verdict":"OK","proc":"proc/boot/on","type":"-","kind":"ability","ability":"spawn_setuid","root":true,"range":[23,23],"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":157973071,"verdict":"OK","proc":"proc/boot/on","type":"-","kind":"ability","ability":"spawn_setgid","root":true,"range":[23,23],"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":157974578,"verdict":"OK","proc":"proc/boot/on","type":"-","kind":"ability","ability":"settypeid","root":true,"range":[2,2],"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":158222735,"verdict":"OK","proc":"proc/boot/on","type":"-","kind":"ability","ability":"spawn","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":158229228,"verdict":"OK","proc":"/proc/boot/procnto-smp-instr","type":"-","kind":"ability","ability":"xprocess_able","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":158908946,"verdict":"OK","proc":"","type":"can_hal_t","kind":"ability","ability":"map_fixed","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":158913864,"verdict":"OK","proc":"","type":"can_hal_t","kind":"ability","ability":"prot_exec","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_ALERT:{"kind":"multi_hop_chain","chain":["-","can_hal_t"],"ts_ns":158913864}
+SECPOLEV_JSON:{"ts_ns":158996942,"verdict":"OK","proc":"","type":"can_hal_t","kind":"ability","ability":"map_fixed","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":159290114,"verdict":"OK","proc":"","type":"can_hal_t","kind":"ability","ability":"map_fixed","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":159292113,"verdict":"OK","proc":"","type":"can_hal_t","kind":"ability","ability":"prot_exec","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":159349863,"verdict":"OK","proc":"","type":"can_hal_t","kind":"ability","ability":"map_fixed","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":159410667,"verdict":"OK","proc":"","type":"can_hal_t","kind":"ability","ability":"map_fixed","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":161747908,"verdict":"OK","proc":"proc/boot/can_server","type":"can_hal_t","kind":"ability","ability":"map_fixed","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":161752257,"verdict":"OK","proc":"proc/boot/can_server","type":"can_hal_t","kind":"ability","ability":"prot_exec","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":161809730,"verdict":"OK","proc":"proc/boot/can_server","type":"can_hal_t","kind":"ability","ability":"map_fixed","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":161882602,"verdict":"OK","proc":"proc/boot/can_server","type":"can_hal_t","kind":"ability","ability":"map_fixed","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":161991812,"verdict":"OK","proc":"proc/boot/can_server","type":"can_hal_t","kind":"ability","ability":"map_fixed","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":162679381,"verdict":"OK","proc":"proc/boot/can_server","type":"can_hal_t","kind":"ability","ability":"map_fixed","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":162683925,"verdict":"OK","proc":"proc/boot/can_server","type":"can_hal_t","kind":"ability","ability":"prot_exec","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":162782314,"verdict":"OK","proc":"proc/boot/can_server","type":"can_hal_t","kind":"ability","ability":"map_fixed","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":162844767,"verdict":"OK","proc":"proc/boot/can_server","type":"can_hal_t","kind":"ability","ability":"map_fixed","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":164317074,"verdict":"OK","proc":"proc/boot/can_server","type":"can_hal_t","kind":"ability","ability":"public_channel","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":164658367,"verdict":"OK","proc":"proc/boot/can_server","type":"can_hal_t","kind":"attach","ability":"","root":false,"range":null,"path":"/dev/name/local/can_ctrl","status":"ok","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":166050049,"verdict":"OK","proc":"/proc/boot/procnto-smp-instr","type":"-","kind":"ability","ability":"spawn","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":166182175,"verdict":"OK","proc":"","type":"-","kind":"ability","ability":"pgrp","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":166900068,"verdict":"OK","proc":"","type":"-","kind":"ability","ability":"map_fixed","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":166903556,"verdict":"OK","proc":"","type":"-","kind":"ability","ability":"prot_exec","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":166999311,"verdict":"OK","proc":"","type":"-","kind":"ability","ability":"map_fixed","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":167206033,"verdict":"OK","proc":"","type":"-","kind":"ability","ability":"map_fixed","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":167603982,"verdict":"OK","proc":"","type":"-","kind":"ability","ability":"map_fixed","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":167606538,"verdict":"OK","proc":"","type":"-","kind":"ability","ability":"prot_exec","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":167673929,"verdict":"OK","proc":"","type":"-","kind":"ability","ability":"map_fixed","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":167764115,"verdict":"OK","proc":"","type":"-","kind":"ability","ability":"map_fixed","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":169300439,"verdict":"OK","proc":"proc/boot/pidin","type":"-","kind":"ability","ability":"map_fixed","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":169305038,"verdict":"OK","proc":"proc/boot/pidin","type":"-","kind":"ability","ability":"prot_exec","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":169385694,"verdict":"OK","proc":"proc/boot/pidin","type":"-","kind":"ability","ability":"map_fixed","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":169470552,"verdict":"OK","proc":"proc/boot/pidin","type":"-","kind":"ability","ability":"map_fixed","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":169590423,"verdict":"OK","proc":"proc/boot/pidin","type":"-","kind":"ability","ability":"map_fixed","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":170367408,"verdict":"OK","proc":"proc/boot/pidin","type":"-","kind":"ability","ability":"map_fixed","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":170371949,"verdict":"OK","proc":"proc/boot/pidin","type":"-","kind":"ability","ability":"prot_exec","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":170432870,"verdict":"OK","proc":"proc/boot/pidin","type":"-","kind":"ability","ability":"map_fixed","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":170503643,"verdict":"OK","proc":"proc/boot/pidin","type":"-","kind":"ability","ability":"map_fixed","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":175424093,"verdict":"OK","proc":"proc/boot/pidin","type":"-","kind":"ability","ability":"xprocess_query","root":true,"range":[25,25],"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":175574235,"verdict":"OK","proc":"proc/boot/pidin","type":"-","kind":"ability","ability":"xprocess_query","root":true,"range":[23,23],"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":178387278,"verdict":"OK","proc":"proc/boot/pidin","type":"-","kind":"ability","ability":"xprocess_query","root":true,"range":[25,25],"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":179275022,"verdict":"OK","proc":"proc/boot/pidin","type":"-","kind":"ability","ability":"map_fixed","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":179278837,"verdict":"OK","proc":"proc/boot/pidin","type":"-","kind":"ability","ability":"prot_exec","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":179366066,"verdict":"OK","proc":"proc/boot/pidin","type":"-","kind":"ability","ability":"map_fixed","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":179443106,"verdict":"OK","proc":"proc/boot/pidin","type":"-","kind":"ability","ability":"map_fixed","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":181153497,"verdict":"OK","proc":"proc/boot/pidin","type":"-","kind":"ability","ability":"xprocess_query","root":true,"range":[23,23],"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":183951144,"verdict":"OK","proc":"/proc/boot/procnto-smp-instr","type":"-","kind":"ability","ability":"spawn","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":184060966,"verdict":"OK","proc":"","type":"-","kind":"ability","ability":"pgrp","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":184538836,"verdict":"OK","proc":"","type":"-","kind":"ability","ability":"map_fixed","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":184541752,"verdict":"OK","proc":"","type":"-","kind":"ability","ability":"prot_exec","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":184623220,"verdict":"OK","proc":"","type":"-","kind":"ability","ability":"map_fixed","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":184936704,"verdict":"OK","proc":"","type":"-","kind":"ability","ability":"map_fixed","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":184938896,"verdict":"OK","proc":"","type":"-","kind":"ability","ability":"prot_exec","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":184995710,"verdict":"OK","proc":"","type":"-","kind":"ability","ability":"map_fixed","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":185148045,"verdict":"OK","proc":"","type":"-","kind":"ability","ability":"map_fixed","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":186375907,"verdict":"OK","proc":"proc/boot/on","type":"-","kind":"ability","ability":"map_fixed","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":186380965,"verdict":"OK","proc":"proc/boot/on","type":"-","kind":"ability","ability":"prot_exec","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":186442374,"verdict":"OK","proc":"proc/boot/on","type":"-","kind":"ability","ability":"map_fixed","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":186566304,"verdict":"OK","proc":"proc/boot/on","type":"-","kind":"ability","ability":"map_fixed","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":186683507,"verdict":"OK","proc":"proc/boot/on","type":"-","kind":"ability","ability":"map_fixed","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":187400337,"verdict":"OK","proc":"proc/boot/on","type":"-","kind":"ability","ability":"map_fixed","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":187404625,"verdict":"OK","proc":"proc/boot/on","type":"-","kind":"ability","ability":"prot_exec","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":187459125,"verdict":"OK","proc":"proc/boot/on","type":"-","kind":"ability","ability":"map_fixed","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":187521846,"verdict":"OK","proc":"proc/boot/on","type":"-","kind":"ability","ability":"map_fixed","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":189490426,"verdict":"OK","proc":"proc/boot/on","type":"-","kind":"ability","ability":"map_fixed","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":189495360,"verdict":"OK","proc":"proc/boot/on","type":"-","kind":"ability","ability":"prot_exec","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":189550669,"verdict":"OK","proc":"proc/boot/on","type":"-","kind":"ability","ability":"map_fixed","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":189612217,"verdict":"OK","proc":"proc/boot/on","type":"-","kind":"ability","ability":"map_fixed","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":190597399,"verdict":"OK","proc":"proc/boot/on","type":"-","kind":"ability","ability":"spawn_setuid","root":true,"range":[31,31],"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":190601758,"verdict":"OK","proc":"proc/boot/on","type":"-","kind":"ability","ability":"spawn_setgid","root":true,"range":[31,31],"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":190603342,"verdict":"OK","proc":"proc/boot/on","type":"-","kind":"ability","ability":"settypeid","root":true,"range":[5,5],"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":190736620,"verdict":"OK","proc":"proc/boot/on","type":"-","kind":"ability","ability":"spawn","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":190741851,"verdict":"OK","proc":"/proc/boot/procnto-smp-instr","type":"-","kind":"ability","ability":"xprocess_able","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":191254834,"verdict":"OK","proc":"","type":"ivi_ui_t","kind":"ability","ability":"map_fixed","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":191258832,"verdict":"OK","proc":"","type":"ivi_ui_t","kind":"ability","ability":"prot_exec","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_ALERT:{"kind":"multi_hop_chain","chain":["-","can_hal_t","ivi_ui_t"],"ts_ns":191258832}
+SECPOLEV_JSON:{"ts_ns":191336899,"verdict":"OK","proc":"","type":"ivi_ui_t","kind":"ability","ability":"map_fixed","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":191617265,"verdict":"OK","proc":"","type":"ivi_ui_t","kind":"ability","ability":"map_fixed","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":191619352,"verdict":"OK","proc":"","type":"ivi_ui_t","kind":"ability","ability":"prot_exec","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":191674184,"verdict":"OK","proc":"","type":"ivi_ui_t","kind":"ability","ability":"map_fixed","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":191792744,"verdict":"OK","proc":"","type":"ivi_ui_t","kind":"ability","ability":"map_fixed","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":193844858,"verdict":"OK","proc":"proc/boot/ivi_exploit","type":"ivi_ui_t","kind":"ability","ability":"map_fixed","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":193850058,"verdict":"OK","proc":"proc/boot/ivi_exploit","type":"ivi_ui_t","kind":"ability","ability":"prot_exec","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":193908943,"verdict":"OK","proc":"proc/boot/ivi_exploit","type":"ivi_ui_t","kind":"ability","ability":"map_fixed","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":193971043,"verdict":"OK","proc":"proc/boot/ivi_exploit","type":"ivi_ui_t","kind":"ability","ability":"map_fixed","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":194521017,"verdict":"OK","proc":"proc/boot/ivi_exploit","type":"ivi_ui_t","kind":"ability","ability":"map_fixed","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":194524691,"verdict":"OK","proc":"proc/boot/ivi_exploit","type":"ivi_ui_t","kind":"ability","ability":"prot_exec","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":194588823,"verdict":"OK","proc":"proc/boot/ivi_exploit","type":"ivi_ui_t","kind":"ability","ability":"map_fixed","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":194662838,"verdict":"OK","proc":"proc/boot/ivi_exploit","type":"ivi_ui_t","kind":"ability","ability":"map_fixed","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":194785901,"verdict":"OK","proc":"proc/boot/ivi_exploit","type":"ivi_ui_t","kind":"ability","ability":"map_fixed","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":195456672,"verdict":"OK","proc":"proc/boot/ivi_exploit","type":"ivi_ui_t","kind":"ability","ability":"map_fixed","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":195460943,"verdict":"OK","proc":"proc/boot/ivi_exploit","type":"ivi_ui_t","kind":"ability","ability":"prot_exec","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":195513243,"verdict":"OK","proc":"proc/boot/ivi_exploit","type":"ivi_ui_t","kind":"ability","ability":"map_fixed","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":195578366,"verdict":"OK","proc":"proc/boot/ivi_exploit","type":"ivi_ui_t","kind":"ability","ability":"map_fixed","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":198201204,"verdict":"DENIED","proc":"proc/boot/ivi_exploit","type":"ivi_ui_t","kind":"ability","ability":"channel_connect","root":false,"range":[2,2],"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":199715277,"verdict":"DENIED","proc":"proc/boot/ivi_exploit","type":"ivi_ui_t","kind":"ability","ability":"settypeid","root":false,"range":[4,4],"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":201682417,"verdict":"OK","proc":"/proc/boot/procnto-smp-instr","type":"-","kind":"ability","ability":"spawn","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":201859141,"verdict":"OK","proc":"","type":"-","kind":"ability","ability":"pgrp","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":202375456,"verdict":"OK","proc":"","type":"-","kind":"ability","ability":"map_fixed","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":202378371,"verdict":"OK","proc":"","type":"-","kind":"ability","ability":"prot_exec","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":202463569,"verdict":"OK","proc":"","type":"-","kind":"ability","ability":"map_fixed","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":202738608,"verdict":"OK","proc":"","type":"-","kind":"ability","ability":"map_fixed","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":202740492,"verdict":"OK","proc":"","type":"-","kind":"ability","ability":"prot_exec","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":202822985,"verdict":"OK","proc":"","type":"-","kind":"ability","ability":"map_fixed","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":202881504,"verdict":"OK","proc":"","type":"-","kind":"ability","ability":"map_fixed","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":204198828,"verdict":"OK","proc":"proc/boot/on","type":"-","kind":"ability","ability":"map_fixed","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":204203685,"verdict":"OK","proc":"proc/boot/on","type":"-","kind":"ability","ability":"prot_exec","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":204262082,"verdict":"OK","proc":"proc/boot/on","type":"-","kind":"ability","ability":"map_fixed","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":204338618,"verdict":"OK","proc":"proc/boot/on","type":"-","kind":"ability","ability":"map_fixed","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":204453352,"verdict":"OK","proc":"proc/boot/on","type":"-","kind":"ability","ability":"map_fixed","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":205038340,"verdict":"OK","proc":"proc/boot/on","type":"-","kind":"ability","ability":"map_fixed","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":205042525,"verdict":"OK","proc":"proc/boot/on","type":"-","kind":"ability","ability":"prot_exec","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":205083684,"verdict":"OK","proc":"proc/boot/on","type":"-","kind":"ability","ability":"map_fixed","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":205141695,"verdict":"OK","proc":"proc/boot/on","type":"-","kind":"ability","ability":"map_fixed","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":207309068,"verdict":"OK","proc":"proc/boot/on","type":"-","kind":"ability","ability":"map_fixed","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":207314133,"verdict":"OK","proc":"proc/boot/on","type":"-","kind":"ability","ability":"prot_exec","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":207399534,"verdict":"OK","proc":"proc/boot/on","type":"-","kind":"ability","ability":"map_fixed","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":207472078,"verdict":"OK","proc":"proc/boot/on","type":"-","kind":"ability","ability":"map_fixed","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":208840461,"verdict":"OK","proc":"proc/boot/on","type":"-","kind":"ability","ability":"spawn_setuid","root":true,"range":[26,26],"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":208845343,"verdict":"OK","proc":"proc/boot/on","type":"-","kind":"ability","ability":"spawn_setgid","root":true,"range":[26,26],"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":208846965,"verdict":"OK","proc":"proc/boot/on","type":"-","kind":"ability","ability":"settypeid","root":true,"range":[7,7],"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":208986175,"verdict":"OK","proc":"proc/boot/on","type":"-","kind":"ability","ability":"spawn","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":208991170,"verdict":"OK","proc":"/proc/boot/procnto-smp-instr","type":"-","kind":"ability","ability":"xprocess_able","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":209505065,"verdict":"OK","proc":"","type":"audit_reader_t","kind":"ability","ability":"map_fixed","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":209509363,"verdict":"OK","proc":"","type":"audit_reader_t","kind":"ability","ability":"prot_exec","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_ALERT:{"kind":"multi_hop_chain","chain":["-","can_hal_t","ivi_ui_t","audit_reader_t"],"ts_ns":209509363}
+SECPOLEV_JSON:{"ts_ns":209601056,"verdict":"OK","proc":"","type":"audit_reader_t","kind":"ability","ability":"map_fixed","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":209675274,"verdict":"OK","proc":"","type":"audit_reader_t","kind":"ability","ability":"map_fixed","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":210357581,"verdict":"OK","proc":"","type":"audit_reader_t","kind":"ability","ability":"map_fixed","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":210362397,"verdict":"OK","proc":"","type":"audit_reader_t","kind":"ability","ability":"prot_exec","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":210453017,"verdict":"OK","proc":"","type":"audit_reader_t","kind":"ability","ability":"map_fixed","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":210538413,"verdict":"OK","proc":"","type":"audit_reader_t","kind":"ability","ability":"map_fixed","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":212764517,"verdict":"OK","proc":"proc/boot/secpol_sentry","type":"audit_reader_t","kind":"ability","ability":"map_fixed","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":212769356,"verdict":"OK","proc":"proc/boot/secpol_sentry","type":"audit_reader_t","kind":"ability","ability":"prot_exec","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":212860365,"verdict":"OK","proc":"proc/boot/secpol_sentry","type":"audit_reader_t","kind":"ability","ability":"map_fixed","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":212931034,"verdict":"OK","proc":"proc/boot/secpol_sentry","type":"audit_reader_t","kind":"ability","ability":"map_fixed","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":213368558,"verdict":"OK","proc":"proc/boot/secpol_sentry","type":"audit_reader_t","kind":"ability","ability":"map_fixed","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":214181972,"verdict":"OK","proc":"proc/boot/secpol_sentry","type":"audit_reader_t","kind":"ability","ability":"map_fixed","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":214186254,"verdict":"OK","proc":"proc/boot/secpol_sentry","type":"audit_reader_t","kind":"ability","ability":"prot_exec","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":214250398,"verdict":"OK","proc":"proc/boot/secpol_sentry","type":"audit_reader_t","kind":"ability","ability":"map_fixed","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":214318377,"verdict":"OK","proc":"proc/boot/secpol_sentry","type":"audit_reader_t","kind":"ability","ability":"map_fixed","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":214922991,"verdict":"OK","proc":"proc/boot/secpol_sentry","type":"audit_reader_t","kind":"ability","ability":"map_fixed","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":214927015,"verdict":"OK","proc":"proc/boot/secpol_sentry","type":"audit_reader_t","kind":"ability","ability":"prot_exec","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":214989032,"verdict":"OK","proc":"proc/boot/secpol_sentry","type":"audit_reader_t","kind":"ability","ability":"map_fixed","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":215076785,"verdict":"OK","proc":"proc/boot/secpol_sentry","type":"audit_reader_t","kind":"ability","ability":"map_fixed","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":215195655,"verdict":"OK","proc":"proc/boot/secpol_sentry","type":"audit_reader_t","kind":"ability","ability":"map_fixed","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":215804768,"verdict":"OK","proc":"proc/boot/secpol_sentry","type":"audit_reader_t","kind":"ability","ability":"map_fixed","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":215829202,"verdict":"OK","proc":"proc/boot/secpol_sentry","type":"audit_reader_t","kind":"ability","ability":"prot_exec","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":215894264,"verdict":"OK","proc":"proc/boot/secpol_sentry","type":"audit_reader_t","kind":"ability","ability":"map_fixed","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":215969583,"verdict":"OK","proc":"proc/boot/secpol_sentry","type":"audit_reader_t","kind":"ability","ability":"map_fixed","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":218057008,"verdict":"OK","proc":"proc/boot/secpol_sentry","type":"audit_reader_t","kind":"ability","ability":"channel_connect","root":false,"range":[6,6],"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":219664044,"verdict":"OK","proc":"proc/boot/secpol_sentry","type":"audit_reader_t","kind":"custom","ability":"","root":false,"range":null,"path":"","status":"","class":"sentry","perm":"read_events","obj_type":"secpol_sentry_t"}
+SECPOLEV_JSON:{"ts_ns":222939488,"verdict":"OK","proc":"/proc/boot/procnto-smp-instr","type":"-","kind":"ability","ability":"spawn","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":223155895,"verdict":"OK","proc":"","type":"-","kind":"ability","ability":"pgrp","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":223665588,"verdict":"OK","proc":"","type":"-","kind":"ability","ability":"map_fixed","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":223668361,"verdict":"OK","proc":"","type":"-","kind":"ability","ability":"prot_exec","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":223750573,"verdict":"OK","proc":"","type":"-","kind":"ability","ability":"map_fixed","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":224104431,"verdict":"OK","proc":"","type":"-","kind":"ability","ability":"map_fixed","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":224106958,"verdict":"OK","proc":"","type":"-","kind":"ability","ability":"prot_exec","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":224173288,"verdict":"OK","proc":"","type":"-","kind":"ability","ability":"map_fixed","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":224235186,"verdict":"OK","proc":"","type":"-","kind":"ability","ability":"map_fixed","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":225455229,"verdict":"OK","proc":"proc/boot/on","type":"-","kind":"ability","ability":"map_fixed","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":225460200,"verdict":"OK","proc":"proc/boot/on","type":"-","kind":"ability","ability":"prot_exec","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":225517827,"verdict":"OK","proc":"proc/boot/on","type":"-","kind":"ability","ability":"map_fixed","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":225592297,"verdict":"OK","proc":"proc/boot/on","type":"-","kind":"ability","ability":"map_fixed","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":225703407,"verdict":"OK","proc":"proc/boot/on","type":"-","kind":"ability","ability":"map_fixed","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":226290030,"verdict":"OK","proc":"proc/boot/on","type":"-","kind":"ability","ability":"map_fixed","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":226294003,"verdict":"OK","proc":"proc/boot/on","type":"-","kind":"ability","ability":"prot_exec","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":226342438,"verdict":"OK","proc":"proc/boot/on","type":"-","kind":"ability","ability":"map_fixed","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":226402444,"verdict":"OK","proc":"proc/boot/on","type":"-","kind":"ability","ability":"map_fixed","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":228326372,"verdict":"OK","proc":"proc/boot/on","type":"-","kind":"ability","ability":"map_fixed","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":228330929,"verdict":"OK","proc":"proc/boot/on","type":"-","kind":"ability","ability":"prot_exec","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":228387455,"verdict":"OK","proc":"proc/boot/on","type":"-","kind":"ability","ability":"map_fixed","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":228448049,"verdict":"OK","proc":"proc/boot/on","type":"-","kind":"ability","ability":"map_fixed","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":229547480,"verdict":"OK","proc":"proc/boot/on","type":"-","kind":"ability","ability":"spawn_setuid","root":true,"range":[31,31],"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":229552218,"verdict":"OK","proc":"proc/boot/on","type":"-","kind":"ability","ability":"spawn_setgid","root":true,"range":[31,31],"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":229553463,"verdict":"OK","proc":"proc/boot/on","type":"-","kind":"ability","ability":"settypeid","root":true,"range":[5,5],"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":229683865,"verdict":"OK","proc":"proc/boot/on","type":"-","kind":"ability","ability":"spawn","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":229688640,"verdict":"OK","proc":"/proc/boot/procnto-smp-instr","type":"-","kind":"ability","ability":"xprocess_able","root":true,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":230384657,"verdict":"OK","proc":"","type":"ivi_ui_t","kind":"ability","ability":"map_fixed","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":230389665,"verdict":"OK","proc":"","type":"ivi_ui_t","kind":"ability","ability":"prot_exec","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":230475897,"verdict":"OK","proc":"","type":"ivi_ui_t","kind":"ability","ability":"map_fixed","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":230546093,"verdict":"OK","proc":"","type":"ivi_ui_t","kind":"ability","ability":"map_fixed","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":231012494,"verdict":"OK","proc":"","type":"ivi_ui_t","kind":"ability","ability":"map_fixed","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":231016749,"verdict":"OK","proc":"","type":"ivi_ui_t","kind":"ability","ability":"prot_exec","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":231090590,"verdict":"OK","proc":"","type":"ivi_ui_t","kind":"ability","ability":"map_fixed","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":231157107,"verdict":"OK","proc":"","type":"ivi_ui_t","kind":"ability","ability":"map_fixed","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":232952091,"verdict":"OK","proc":"proc/boot/secpol_sentry","type":"ivi_ui_t","kind":"ability","ability":"map_fixed","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":232956071,"verdict":"OK","proc":"proc/boot/secpol_sentry","type":"ivi_ui_t","kind":"ability","ability":"prot_exec","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":233010912,"verdict":"OK","proc":"proc/boot/secpol_sentry","type":"ivi_ui_t","kind":"ability","ability":"map_fixed","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":233067000,"verdict":"OK","proc":"proc/boot/secpol_sentry","type":"ivi_ui_t","kind":"ability","ability":"map_fixed","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":233305984,"verdict":"OK","proc":"proc/boot/secpol_sentry","type":"ivi_ui_t","kind":"ability","ability":"map_fixed","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":233910038,"verdict":"OK","proc":"proc/boot/secpol_sentry","type":"ivi_ui_t","kind":"ability","ability":"map_fixed","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":233914964,"verdict":"OK","proc":"proc/boot/secpol_sentry","type":"ivi_ui_t","kind":"ability","ability":"prot_exec","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":233984563,"verdict":"OK","proc":"proc/boot/secpol_sentry","type":"ivi_ui_t","kind":"ability","ability":"map_fixed","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":234157600,"verdict":"OK","proc":"proc/boot/secpol_sentry","type":"ivi_ui_t","kind":"ability","ability":"map_fixed","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":234656304,"verdict":"OK","proc":"proc/boot/secpol_sentry","type":"ivi_ui_t","kind":"ability","ability":"map_fixed","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":234660686,"verdict":"OK","proc":"proc/boot/secpol_sentry","type":"ivi_ui_t","kind":"ability","ability":"prot_exec","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":234713887,"verdict":"OK","proc":"proc/boot/secpol_sentry","type":"ivi_ui_t","kind":"ability","ability":"map_fixed","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":234788171,"verdict":"OK","proc":"proc/boot/secpol_sentry","type":"ivi_ui_t","kind":"ability","ability":"map_fixed","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":234920581,"verdict":"OK","proc":"proc/boot/secpol_sentry","type":"ivi_ui_t","kind":"ability","ability":"map_fixed","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":235490982,"verdict":"OK","proc":"proc/boot/secpol_sentry","type":"ivi_ui_t","kind":"ability","ability":"map_fixed","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":235495042,"verdict":"OK","proc":"proc/boot/secpol_sentry","type":"ivi_ui_t","kind":"ability","ability":"prot_exec","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":235546848,"verdict":"OK","proc":"proc/boot/secpol_sentry","type":"ivi_ui_t","kind":"ability","ability":"map_fixed","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":235608592,"verdict":"OK","proc":"proc/boot/secpol_sentry","type":"ivi_ui_t","kind":"ability","ability":"map_fixed","root":false,"range":null,"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":237164142,"verdict":"OK","proc":"proc/boot/secpol_sentry","type":"ivi_ui_t","kind":"ability","ability":"channel_connect","root":false,"range":[6,6],"path":"","status":"","class":"","perm":"","obj_type":""}
+SECPOLEV_JSON:{"ts_ns":237458056,"verdict":"DENIED","proc":"proc/boot/secpol_sentry","type":"ivi_ui_t","kind":"custom","ability":"","root":false,"range":null,"path":"","status":"","class":"sentry","perm":"read_events","obj_type":"secpol_sentry_t"}
+SECPOLEV_STATS: ok=219 denied=3 dropped=0
+Unable to access "/dev/secpol_sentry_done" (2)
+=== SECPOL_AUDIT_DONE ===
