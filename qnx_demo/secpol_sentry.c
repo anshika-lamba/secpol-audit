@@ -547,7 +547,7 @@ static int sentry_io_read(resmgr_context_t *ctp, io_read_t *msg, RESMGR_OCB_T *c
         return EACCES;
     }
     if (g_read_perm == NULL ||
-        secpol_check_permission(&ctp->info, secpol_type_id(), g_read_perm) != 1) {
+        secpol_check_permission(&ctp->info, secpol_type_id(), g_read_perm) != 0) {
         return EACCES;
     }
 
