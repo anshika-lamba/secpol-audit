@@ -420,21 +420,51 @@ def correlate_events(
             )
         )
 
-    # 2. Index observed settypeid OK events, type appearances, and multi-hop alerts
+    # 2. Index observed settypeid OK events (excluding untyped boot launcher `-`),
+    #    type appearances, and validated multi-hop alerts.
     settypeid_ok_by_type: dict[str, list[SecpolEvent]] = {}
     type_latest_ts: dict[str, int] = {}
     for ev in log.events:
-        if ev.type:
+        if ev.type and ev.type != "-":
             prev = type_latest_ts.get(ev.type, -1)
             if ev.ts_ns >= prev:
                 type_latest_ts[ev.type] = ev.ts_ns
-        if ev.verdict == "OK" and ev.kind == "ability" and ev.ability == "settypeid" and ev.type:
+        if (
+            ev.verdict == "OK"
+            and ev.kind == "ability"
+            and ev.ability == "settypeid"
+            and ev.type
+            and ev.type != "-"
+        ):
             settypeid_ok_by_type.setdefault(ev.type, []).append(ev)
 
+    static_esc_pairs: set[tuple[str, str]] = {
+        (e.src, e.dst) for e in path_result.escalation_edges if e.src != e.dst
+    }
+
+    # Filter alerts to valid typed chains (strip boot launcher `-` emitted by `proc/boot/on`)
     alert_edge_pairs: set[tuple[str, str]] = set()
+    valid_alerts: list[tuple[SecpolAlert, tuple[str, ...]]] = []
     for alert in log.alerts:
-        for i in range(len(alert.chain) - 1):
-            alert_edge_pairs.add((alert.chain[i], alert.chain[i + 1]))
+        typed_chain = tuple(t for t in alert.chain if t and t != "-" and t in policy.types)
+        if len(typed_chain) < 2:
+            continue
+        # Only trust an alert edge (a, b) if `a` actually executed a typed `settypeid` OK
+        # or (a, b) is a static escalation edge whose source executed `settypeid` OK.
+        valid_hops = [
+            (typed_chain[i], typed_chain[i + 1])
+            for i in range(len(typed_chain) - 1)
+            if typed_chain[i] in settypeid_ok_by_type
+            and (
+                (typed_chain[i], typed_chain[i + 1]) in static_esc_pairs
+                or not static_esc_pairs
+            )
+        ]
+        if valid_hops:
+            for pair in valid_hops:
+                alert_edge_pairs.add(pair)
+            if len(valid_hops) == len(typed_chain) - 1:
+                valid_alerts.append((alert, typed_chain))
 
     # Out-degree of static escalation edges per source
     esc_out_counts: dict[str, int] = {}
@@ -469,7 +499,7 @@ def correlate_events(
         ep_pairs = [(ep.nodes[i], ep.nodes[i + 1]) for i in range(len(ep.nodes) - 1)]
         all_hops_verified = bool(ep_pairs) and all(p in verified_edges_set for p in ep_pairs)
         matching_alert = next(
-            (a for a in log.alerts if tuple(a.chain) == ep.nodes),
+            (a for a, tc in valid_alerts if tc == ep.nodes),
             None,
         )
         if all_hops_verified or matching_alert is not None:
@@ -489,6 +519,11 @@ def correlate_events(
                 for p in ep_pairs
                 if p in verified_edge_evidence
             ]
+            range_ids = [
+                list(verified_edge_evidence[p].range)
+                for p in ep_pairs
+                if p in verified_edge_evidence and verified_edge_evidence[p].range is not None
+            ]
             findings.append(
                 Finding(
                     rule_id="KERNEL_TRACE_ESCALATION_OBSERVED",
@@ -507,37 +542,42 @@ def correlate_events(
                         "hops": ep.hops,
                         "verified_edges": [[s, d] for s, d in ep_pairs],
                         "timestamps_ns": ts_list,
+                        "range_ids": range_ids,
                         "sink_reasons": list(ep.sink_reasons),
                         "is_synthetic_fixture": log.is_synthetic_fixture,
                     },
                 )
             )
 
-    # Also report any multi-hop alert not covered by a static escalation path
-    for alert in log.alerts:
-        if len(alert.chain) >= 2 and alert.chain not in covered_alert_chains:
-            # Skip strict prefix of an already-reported verified chain
+    # Also report any validated typed multi-hop alert not covered by a static escalation path
+    for alert, typed_chain in valid_alerts:
+        if len(typed_chain) >= 2 and typed_chain not in covered_alert_chains:
+            # Skip strict prefix/subpath of an already-reported verified chain
             if any(
-                len(vc) > len(alert.chain) and tuple(vc[: len(alert.chain)]) == alert.chain
+                len(vc) >= len(typed_chain)
+                and any(
+                    tuple(vc[i : i + len(typed_chain)]) == typed_chain
+                    for i in range(len(vc) - len(typed_chain) + 1)
+                )
                 for vc in verified_chains
             ):
                 continue
-            verified_chains.append(list(alert.chain))
+            verified_chains.append(list(typed_chain))
             findings.append(
                 Finding(
                     rule_id="KERNEL_TRACE_ESCALATION_OBSERVED",
                     severity=Severity.CRITICAL,
                     message=(
                         f"libsecpolev stateful detector alerted on multi-hop chain: "
-                        f"{' -> '.join(alert.chain)} (ts_ns={alert.ts_ns})"
+                        f"{' -> '.join(typed_chain)} (ts_ns={alert.ts_ns})"
                     ),
                     span=SourceSpan(file=log.source_path, line=alert.line, col=1),
                     remediation=(
-                        f"Audit transition permissions along {' -> '.join(alert.chain)} and remove "
+                        f"Audit transition permissions along {' -> '.join(typed_chain)} and remove "
                         "unintended settypeid chains."
                     ),
                     metadata={
-                        "chain": list(alert.chain),
+                        "chain": list(typed_chain),
                         "alert_kind": alert.kind,
                         "ts_ns": alert.ts_ns,
                         "is_synthetic_fixture": log.is_synthetic_fixture,

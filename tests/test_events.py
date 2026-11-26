@@ -200,3 +200,83 @@ def test_cli_verify_events_exit_codes_sarif_html_and_svg(tmp_path: Path, capsys:
     err_bad = capsys.readouterr().err
     assert rc_bad == 2
     assert "PARSE_ERROR" in err_bad
+
+
+def test_real_qnx8_m0_sentry_clean_log_passes_with_zero_findings(capsys) -> None:
+    real_m0_log = REPO_ROOT / "evidence/qemu_logs/M0_sentry_clean.log"
+    assert real_m0_log.is_file(), "Real QNX 8.0 M0_sentry_clean.log must exist in evidence/qemu_logs/"
+
+    pol = parse_secpol_file(M0_SENTRY_POLICY)
+    ifs = parse_ifs_file(SENTRY_IFS)
+    parsed = parse_events_file(real_m0_log)
+    res = correlate_events(parsed, pol, ifs=ifs)
+
+    assert len(parsed.events) == 222
+    assert parsed.stats.dropped == 0
+    assert res.findings == []
+    assert res.verified_edges == []
+    assert len(res.custom_perm_grants) == 1
+    assert len(res.custom_perm_denials) == 1
+
+    rc = main(
+        [
+            "verify-events",
+            str(M0_SENTRY_POLICY),
+            "--log",
+            str(real_m0_log),
+            "--ifs",
+            str(SENTRY_IFS),
+            "--format",
+            "json",
+        ]
+    )
+    out = json.loads(capsys.readouterr().out)
+    assert rc == 0
+    assert out["summary"]["total_findings"] == 0
+    assert out["summary"]["stats"]["dropped"] == 0
+    assert out["summary"]["verified_escalation_edges"] == 0
+
+
+def test_real_qnx8_m3_sentry_escalate_log_confirms_2hop_chain(capsys, tmp_path: Path) -> None:
+    real_m3_log = REPO_ROOT / "evidence/qemu_logs/M3_sentry_escalate.log"
+    assert real_m3_log.is_file(), "Real QNX 8.0 M3_sentry_escalate.log must exist in evidence/qemu_logs/"
+
+    pol = parse_secpol_file(M3_SENTRY_POLICY)
+    ifs = parse_ifs_file(SENTRY_IFS)
+    parsed = parse_events_file(real_m3_log)
+    res = correlate_events(parsed, pol, ifs=ifs)
+
+    assert len(parsed.events) == 270
+    assert parsed.stats.dropped == 0
+    assert ("ivi_ui_t", "diag_helper_t") in res.verified_edges
+    assert ("diag_helper_t", "can_hal_t") in res.verified_edges
+    # Untyped boot-launcher `"-"` must NEVER appear as a verified escalation edge
+    assert all(src != "-" and dst != "-" for src, dst in res.verified_edges)
+
+    rule_ids = [f.rule_id for f in res.findings]
+    assert rule_ids == ["KERNEL_TRACE_ESCALATION_OBSERVED"]
+    assert res.findings[0].severity == Severity.CRITICAL
+    assert "ivi_ui_t -> diag_helper_t -> can_hal_t" in res.findings[0].message
+
+    sarif_out = tmp_path / "m3_real.sarif"
+    rc = main(
+        [
+            "verify-events",
+            str(M3_SENTRY_POLICY),
+            "--log",
+            str(real_m3_log),
+            "--ifs",
+            str(SENTRY_IFS),
+            "--format",
+            "sarif",
+            "--output",
+            str(sarif_out),
+        ]
+    )
+    assert rc == 1
+    sarif_doc = json.loads(sarif_out.read_text(encoding="utf-8"))
+    assert sarif_doc["version"] == "2.1.0"
+    assert [r["ruleId"] for r in sarif_doc["runs"][0]["results"]] == [
+        "KERNEL_TRACE_ESCALATION_OBSERVED"
+    ]
+

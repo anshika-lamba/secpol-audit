@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from secpol_audit.checks import run_all_checks, run_ifs_checks, run_policy_checks
 from secpol_audit.ir import Severity
 from secpol_audit.parser_ifs import parse_ifs_file, parse_ifs_text
@@ -171,5 +173,238 @@ def test_all_qnx_demo_mutants_static_predictions() -> None:
         can_attaches = [ap.path for r in pol.attach_rules if "can_hal_t" in r.types for ap in r.paths]
         assert "/dev/name/local/can_ctrl" in can_attaches
         assert any("can_hal_t" in r.sources and "self" in r.targets for r in pol.connect_rules)
+
+
+def test_child_ability_inheritance_leak_flagged_and_mitigated() -> None:
+    vuln = parse_secpol_text(
+        """
+        type spawner_t;
+        type child_t;
+        allow spawner_t self:ability {
+            nonroot
+            mem_phys:0xfe000000-0xfe010000
+            io
+            settypeid:child_t
+        };
+        """,
+        "leak.secpol",
+    )
+    findings = run_policy_checks(vuln)
+    leak_f = [f for f in findings if f.rule_id == "CHILD_ABILITY_INHERITANCE_LEAK"]
+    assert len(leak_f) == 1
+    assert leak_f[0].severity == Severity.HIGH
+    assert leak_f[0].metadata["type"] == "spawner_t"
+    assert any("mem_phys" in a for a in leak_f[0].metadata["leaked_abilities"])
+    assert any("io" in a for a in leak_f[0].metadata["leaked_abilities"])
+
+    # Mitigated with `noinherit` on privileged abilities -> 0 CHILD_ABILITY_INHERITANCE_LEAK
+    mitigated_noinherit = parse_secpol_text(
+        """
+        type spawner_t;
+        type child_t;
+        allow spawner_t self:ability {
+            nonroot
+            noinherit mem_phys:0xfe000000-0xfe010000
+            noinherit io
+            settypeid:child_t
+        };
+        """,
+        "noinherit.secpol",
+    )
+    assert not any(
+        f.rule_id == "CHILD_ABILITY_INHERITANCE_LEAK"
+        for f in run_policy_checks(mitigated_noinherit)
+    )
+
+    # Mitigated with `default_spawn_type` -> 0 CHILD_ABILITY_INHERITANCE_LEAK
+    mitigated_dst = parse_secpol_text(
+        """
+        type spawner_t;
+        type child_t;
+        default_spawn_type spawner_t child_t;
+        allow spawner_t self:ability {
+            nonroot
+            mem_phys:0xfe000000-0xfe010000
+            spawn
+        };
+        """,
+        "dst.secpol",
+    )
+    assert not any(
+        f.rule_id == "CHILD_ABILITY_INHERITANCE_LEAK"
+        for f in run_policy_checks(mitigated_dst)
+    )
+
+
+def test_child_ability_inheritance_leak_covers_spawn_and_unprivileged_ignored() -> None:
+    pol = parse_secpol_text(
+        """
+        type mgr_t;
+        type ui_t;
+        type worker_t;
+        allow mgr_t self:ability { nonroot mac_policy prot_exec spawn };
+        allow ui_t self:ability { nonroot public_channel settypeid:worker_t };
+        """,
+        "spawn.secpol",
+    )
+    leak_f = [f for f in run_policy_checks(pol) if f.rule_id == "CHILD_ABILITY_INHERITANCE_LEAK"]
+    assert len(leak_f) == 1
+    assert leak_f[0].metadata["type"] == "mgr_t"
+
+
+def test_root_service_without_uid_drop_detects_missing_and_uid0() -> None:
+    pol = parse_secpol_text(
+        """
+        type svc_a_t;
+        type svc_b_t;
+        type svc_c_t;
+        type suid_mgr_t;
+        allow svc_a_t self:ability { nonroot public_channel };
+        allow svc_b_t self:ability { nonroot public_channel };
+        allow svc_c_t self:ability { nonroot public_channel };
+        allow suid_mgr_t self:ability { setuid:0 };
+        """,
+        "uid.secpol",
+    )
+    ifs = parse_ifs_text(
+        """
+        [+script] startup-script = {
+            secpolpush /etc/secpol.bin
+            on -T svc_a_t svc_a &
+            on -T svc_b_t -u 0:0 svc_b &
+            on -T svc_c_t -u 25:25 svc_c &
+            on -T suid_mgr_t suid_mgr &
+        }
+        """,
+        "uid.ifs",
+    )
+    findings = run_ifs_checks(ifs, pol)
+    uid_findings = [f for f in findings if f.rule_id == "ROOT_SERVICE_WITHOUT_UID_DROP"]
+    flagged_types = {f.metadata["type"] for f in uid_findings}
+    assert flagged_types == {"svc_a_t", "svc_b_t"}
+    assert all(f.severity == Severity.HIGH for f in uid_findings)
+    # svc_c_t drops to 25:25 and suid_mgr_t legitimately needs root setuid:0
+    assert "svc_c_t" not in flagged_types
+    assert "suid_mgr_t" not in flagged_types
+
+
+def test_nonroot_mount_acl_mismatch_across_posix_octal_and_qnx_acl() -> None:
+    pol = parse_secpol_text(
+        """
+        type srv_t;
+        type cli_blocked_t;
+        type cli_allowed_t;
+        type link_blocked_t;
+        mount_point 0:0 rwxr-x--- /dev/secret;
+        mount_point 0:0 0700 /var/priv;
+        mount_point 0:0 { u::rwx g::rx u:31:rx o::--- } /dev/acl_dir;
+        allow_attach srv_t /dev/secret/ctrl;
+        allow_attach srv_t /dev/acl_dir/pipe;
+        allow cli_blocked_t srv_t : channel connect;
+        allow cli_allowed_t srv_t : channel connect;
+        allow_link link_blocked_t /var/priv/sock;
+        """,
+        "acl.secpol",
+    )
+    ifs = parse_ifs_text(
+        """
+        [+script] startup-script = {
+            secpolpush /etc/secpol.bin
+            on -T srv_t -u 0:0 srv &
+            on -T cli_blocked_t -u 25:25 cli_blocked &
+            on -T cli_allowed_t -u 31:31 cli_allowed &
+            on -T link_blocked_t -u 29:29 link_blocked &
+        }
+        """,
+        "acl.ifs",
+    )
+    findings = run_ifs_checks(ifs, pol)
+    acl_f = [f for f in findings if f.rule_id == "NONROOT_MOUNT_ACL_MISMATCH"]
+    pairs = {(f.metadata["type"], f.metadata["mount_path"]) for f in acl_f}
+    # cli_blocked_t (uid 25) is denied on BOTH /dev/secret (rwxr-x---) and /dev/acl_dir (only u:31:rx)
+    assert ("cli_blocked_t", "/dev/secret") in pairs
+    assert ("cli_blocked_t", "/dev/acl_dir") in pairs
+    # cli_allowed_t (uid 31) is ALLOWED on /dev/acl_dir (u:31:rx) but DENIED on /dev/secret
+    assert ("cli_allowed_t", "/dev/acl_dir") not in pairs
+    assert ("cli_allowed_t", "/dev/secret") in pairs
+    # link_blocked_t (uid 29) is denied on /var/priv (0700)
+    assert ("link_blocked_t", "/var/priv") in pairs
+    assert all(f.severity == Severity.MEDIUM for f in acl_f)
+    assert all("mount_point" in f.remediation for f in acl_f)
+
+
+@pytest.mark.parametrize(
+    "priv_ability",
+    ["mem_phys", "io", "mac_policy", "prot_exec", "able_create", "setuid", "pathspace"],
+)
+def test_child_ability_inheritance_leak_all_seven_privileged_abilities(priv_ability: str) -> None:
+    pol = parse_secpol_text(
+        f"""
+        type parent_t;
+        type child_t;
+        allow parent_t self:ability {{ nonroot {priv_ability} settypeid:child_t }};
+        """,
+        "all7.secpol",
+    )
+    leaks = [f for f in run_policy_checks(pol) if f.rule_id == "CHILD_ABILITY_INHERITANCE_LEAK"]
+    assert len(leaks) == 1
+    assert leaks[0].metadata["type"] == "parent_t"
+
+
+def test_root_service_without_uid_drop_named_root_and_bare_zero() -> None:
+    pol = parse_secpol_text("type a_t;\ntype b_t;\n", "root.secpol")
+    ifs = parse_ifs_text(
+        """
+        [+script] startup-script = {
+            secpolpush /etc/secpol.bin
+            on -T a_t -u root:root svc_a &
+            on -T b_t -u 0 svc_b &
+        }
+        """,
+        "root.ifs",
+    )
+    flagged = {f.metadata["type"] for f in run_ifs_checks(ifs, pol) if f.rule_id == "ROOT_SERVICE_WITHOUT_UID_DROP"}
+    assert flagged == {"a_t", "b_t"}
+
+
+def test_nonroot_mount_acl_group_match_and_exact_path_denial() -> None:
+    pol = parse_secpol_text(
+        """
+        type srv_t;
+        type grp_ok_t;
+        type other_denied_t;
+        mount_point 0:20 0750 /dev/grp_only;
+        mount_point 0:0 rwx------ /dev/exact_ctrl;
+        allow_attach srv_t /dev/grp_only/chan;
+        allow_attach srv_t /dev/exact_ctrl;
+        allow grp_ok_t srv_t : channel connect;
+        allow other_denied_t srv_t : channel connect;
+        """,
+        "grp_acl.secpol",
+    )
+    ifs = parse_ifs_text(
+        """
+        [+script] startup-script = {
+            secpolpush /etc/secpol.bin
+            on -T srv_t -u 0:0 srv &
+            on -T grp_ok_t -u 99:20 grp_ok &
+            on -T other_denied_t -u 99:99 other_denied &
+        }
+        """,
+        "grp_acl.ifs",
+    )
+    pairs = {
+        (f.metadata["type"], f.metadata["mount_path"])
+        for f in run_ifs_checks(ifs, pol)
+        if f.rule_id == "NONROOT_MOUNT_ACL_MISMATCH"
+    }
+    # grp_ok_t has gid=20 matching 0:20 (0750 -> rx) -> allowed on /dev/grp_only, denied on /dev/exact_ctrl
+    assert ("grp_ok_t", "/dev/grp_only") not in pairs
+    assert ("grp_ok_t", "/dev/exact_ctrl") in pairs
+    # other_denied_t (gid=99) is denied on both
+    assert ("other_denied_t", "/dev/grp_only") in pairs
+    assert ("other_denied_t", "/dev/exact_ctrl") in pairs
+
+
 
 
