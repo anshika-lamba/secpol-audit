@@ -23,7 +23,7 @@ jobs:
           MYQNX_LICENSE_KEY: ${{ secrets.MYQNX_LICENSE_KEY }}
           GDRIVE_ID: ${{ secrets.QNX_INSTALLER_GDRIVE_ID }}
         run: |
-          gdown --id "$GDRIVE_ID" -O /tmp/qnx-setup.run
+          gdown "$GDRIVE_ID" -O /tmp/qnx-setup.run
           chmod +x /tmp/qnx-setup.run
           /tmp/qnx-setup.run --noexec --target /tmp/qsc_extract
           CLT=/tmp/qsc_extract/qnxsoftwarecenter/qnxsoftwarecenter_clt
