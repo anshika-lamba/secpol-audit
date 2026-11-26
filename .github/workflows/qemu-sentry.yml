@@ -31,9 +31,17 @@ jobs:
           if [ -n "$MYQNX_LICENSE_KEY" ]; then
             "$CLT" -myqnx.user "$MYQNX_USER" -myqnx.password "$MYQNX_PASSWORD" -activateLicenseKey "$MYQNX_LICENSE_KEY" || true
           fi
-          "$CLT" -myqnx.user "$MYQNX_USER" -myqnx.password "$MYQNX_PASSWORD" -mirror
-          "$CLT" -myqnx.user "$MYQNX_USER" -myqnx.password "$MYQNX_PASSWORD" \
-            -installBaseline com.qnx.qnx800 -destination /tmp/qnx800 -cleanInstall
+          "$CLT" -myqnx.user "$MYQNX_USER" -myqnx.password "$MYQNX_PASSWORD" -mirrorBaseline com.qnx.qnx800
+          for attempt in 1 2; do
+            if "$CLT" -myqnx.user "$MYQNX_USER" -myqnx.password "$MYQNX_PASSWORD" \
+              -installBaseline com.qnx.qnx800 -destination /tmp/qnx800 -cleanInstall; then
+              break
+            fi
+            [ "$attempt" -eq 2 ] && exit 13
+            echo "Retrying QNX SDP 8.0 install after transient timeout..."
+            rm -rf /tmp/qnx800
+            sleep 10
+          done
 
       - name: Build secpol_sentry and boot QNX 8.0 QEMU TCG
         shell: bash
