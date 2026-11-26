@@ -3,7 +3,7 @@ PYTEST ?= pytest
 MUTANTS := M0_clean M1_no_connect M2_untyped_server M3_2hop_escalate M3_fixed
 SENTRY_MUTANTS := M0_sentry_clean M3_sentry_escalate
 
-.PHONY: test demo-report verify-offline verify-fixtures qemu-mutants sentry-binaries sentry-images qemu-sentry clean
+.PHONY: test demo-report verify-offline verify-fixtures qemu-mutants sentry-binaries sentry-images qemu-sentry secpolgen-image qemu-secpolgen clean
 
 test:
 	$(PYTEST) -v
@@ -43,6 +43,15 @@ qemu-sentry:
 		echo "=== Running QEMU x86_64 TCG for sentry mutant $$m ==="; \
 		bash harness/run_qemu.sh qnx_demo/build/$$m.ifs evidence/qemu_logs/$$m.log 60; \
 	done
+
+secpolgen-image:
+	$(MAKE) -C qnx_demo secpolgen-image
+
+qemu-secpolgen:
+	$(MAKE) -C qnx_demo secpolgen-image
+	@mkdir -p qnx_demo/build/secpolgen
+	bash harness/run_qemu.sh qnx_demo/build/secpolgen_capture.ifs qnx_demo/build/secpolgen/secpolgen_capture.log 60
+	$(PYTHON) harness/extract_secpolgen.py qnx_demo/build/secpolgen/secpolgen_capture.log --out-dir qnx_demo/build/secpolgen
 
 clean:
 	$(MAKE) -C qnx_demo clean

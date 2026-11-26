@@ -406,5 +406,54 @@ def test_nonroot_mount_acl_group_match_and_exact_path_denial() -> None:
     assert ("other_denied_t", "/dev/exact_ctrl") in pairs
 
 
+def test_pathspace_hijack_overlap_critical_on_wildcard_attach_and_link() -> None:
+    pol = parse_secpol_text(
+        """
+        type can_hal_t;
+        type ui_wild_attach_t;
+        type ui_wild_link_t;
+        type ui_safe_t;
+
+        allow_attach can_hal_t /dev/name/local/can_ctrl;
+        allow can_hal_t self:ability { nonroot mem_phys:0xfe000000-0xfe010000 io };
+
+        allow_attach ui_wild_attach_t /dev/*;
+        allow_link ui_wild_link_t /dev/name/...;
+        allow_attach ui_safe_t /tmp/ui/*;
+        allow_link ui_safe_t /dev/name/local/can_ctrl;
+        """,
+        "hijack.secpol",
+    )
+    findings = run_policy_checks(pol)
+    hijack = [f for f in findings if f.rule_id == "PATHSPACE_HIJACK_OVERLAP"]
+    assert len(hijack) == 2
+    assert all(f.severity == Severity.CRITICAL for f in hijack)
+    by_low = {f.metadata["low_priv_type"]: f for f in hijack}
+    assert set(by_low.keys()) == {"ui_wild_attach_t", "ui_wild_link_t"}
+    assert by_low["ui_wild_attach_t"].metadata["rule_kind"] == "allow_attach"
+    assert by_low["ui_wild_attach_t"].metadata["privileged_type"] == "can_hal_t"
+    assert by_low["ui_wild_link_t"].metadata["rule_kind"] == "allow_link"
+    assert by_low["ui_wild_link_t"].metadata["privileged_path"] == "/dev/name/local/can_ctrl"
+
+
+def test_pathspace_hijack_overlap_ignores_privileged_or_non_overlapping_wildcards() -> None:
+    pol = parse_secpol_text(
+        """
+        type priv_a_t;
+        type priv_b_t;
+        type low_t;
+
+        allow_attach priv_a_t /dev/can_ctrl;
+        allow priv_a_t self:ability { nonroot mem_phys:0x1000-0x2000 };
+        allow_attach priv_b_t /dev/*;
+        allow priv_b_t self:ability { nonroot io };
+        allow_attach low_t /var/app/...;
+        """,
+        "no_hijack.secpol",
+    )
+    assert not any(f.rule_id == "PATHSPACE_HIJACK_OVERLAP" for f in run_policy_checks(pol))
+
+
+
 
 

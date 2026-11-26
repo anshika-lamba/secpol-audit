@@ -135,6 +135,25 @@ RULE_DESCRIPTIONS: dict[str, tuple[str, str]] = {
         "Source .secpol does not match compiled secpol binary metadata",
         "Compiled policy binary or secpolinfo metadata diverges from the audited source .secpol file.",
     ),
+    "PATHSPACE_HIJACK_OVERLAP": (
+        "Lower-privilege wildcard attach/link overlaps a privileged type's pathspace",
+        "A lower-privilege type holds a wildcard allow_attach or allow_link ('*' or '...') that overlaps "
+        "a privileged type's attached path, enabling QNX pathspace hijacking.",
+    ),
+    "UNUSED_PRIVILEGED_RULE": (
+        "Unused privileged ability flagged by QNX secpolgenerate",
+        "A privileged ability (mem_phys, io, settypeid, or mac_policy) appeared in /dev/secpolgenerate/unused "
+        "and should be pruned for least privilege.",
+    ),
+    "UNREGISTERED_SIGEVENT": (
+        "Unregistered sigevent reported in /dev/secpolgenerate/errors",
+        "QNX secpolgenerate recorded an unregistered sigevent error during policy capture; callers must "
+        "register sigevents with MsgRegisterEvent() under enforced policies.",
+    ),
+    "SECPOLGEN_ERROR": (
+        "Runtime policy-generation error recorded in /dev/secpolgenerate/errors",
+        "QNX secpolgenerate reported a runtime error during capture.",
+    ),
 }
 
 

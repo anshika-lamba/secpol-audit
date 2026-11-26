@@ -1,0 +1,59 @@
+[virtual=x86_64,multiboot] boot = {
+    startup-x86 -D 8250
+    PATH=/proc/boot:/bin:/usr/bin LD_LIBRARY_PATH=/proc/boot:/lib:/usr/lib procnto-smp-instr
+}
+
+[+script] startup-script = {
+    PATH=/proc/boot:/bin:/usr/bin
+    LD_LIBRARY_PATH=/proc/boot:/lib:/usr/lib
+    reopen /dev/text
+
+    display_msg "=== SECPOLGEN_CAPTURE_BEGIN ==="
+    secpolgenerate -u -t 50 &
+    waitfor /dev/secpolgenerate/policy 5
+    secpolpush
+
+    on -T slogger2_t /proc/boot/slogger2 &
+    waitfor /dev/slog2 3
+
+    on -T pipe_t /proc/boot/pipe &
+    waitfor /dev/pipe 3
+
+    on -T random_t /proc/boot/random &
+    waitfor /dev/random 3
+
+    on -T can_hal_t /proc/boot/can_server &
+    waitfor /dev/name/local/can_ctrl 5
+
+    display_msg "=== PIDIN_BEGIN ==="
+    pidin -f a_n
+    display_msg "=== PIDIN_END ==="
+
+    display_msg "=== SECPOLGEN_POLICY_BEGIN ==="
+    cat /dev/secpolgenerate/policy
+    display_msg "=== SECPOLGEN_POLICY_END ==="
+
+    display_msg "=== SECPOLGEN_UNUSED_BEGIN ==="
+    cat /dev/secpolgenerate/unused
+    display_msg "=== SECPOLGEN_UNUSED_END ==="
+
+    display_msg "=== SECPOLGEN_ERRORS_BEGIN ==="
+    cat /dev/secpolgenerate/errors
+    display_msg "=== SECPOLGEN_ERRORS_END ==="
+
+    display_msg "=== SECPOL_AUDIT_DONE ==="
+}
+
+[autoso=add]
+/usr/lib/ldqnx-64.so.2=ldqnx-64.so.2
+libc.so.6
+libsecpol.so=libsecpol-gen.so.1
+/proc/boot/secpolgenerate=secpolgenerate
+/proc/boot/secpolpush=secpolpush
+/proc/boot/on=on
+/proc/boot/pidin=pidin
+/proc/boot/cat=cat
+/proc/boot/slogger2=slogger2
+/proc/boot/pipe=pipe
+/proc/boot/random=random
+/proc/boot/can_server=build/can_server

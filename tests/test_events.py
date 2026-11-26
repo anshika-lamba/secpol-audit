@@ -280,3 +280,21 @@ def test_real_qnx8_m3_sentry_escalate_log_confirms_2hop_chain(capsys, tmp_path: 
         "KERNEL_TRACE_ESCALATION_OBSERVED"
     ]
 
+
+def test_parse_events_tracks_multi_client_auth_reads() -> None:
+    text = (
+        "# SYNTHETIC UNIT-TEST FIXTURE\n"
+        "SENTRY_CLIENT1_AUTH=OK bytes=412\n"
+        "SENTRY_CLIENT2_AUTH=OK bytes=412\n"
+        "SENTRY_READ_UNAUTH=DENIED errno=13\n"
+        "SECPOLEV_STATS: ok=42 denied=1 dropped=0\n"
+    )
+    parsed = parse_events_text(text, "multi_client.log")
+    assert parsed.sentry_client_reads == {
+        "SENTRY_CLIENT1_AUTH": "OK",
+        "SENTRY_CLIENT2_AUTH": "OK",
+    }
+    assert parsed.sentry_read_auth == "OK"
+    assert parsed.sentry_read_unauth == "DENIED"
+
+
