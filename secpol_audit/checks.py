@@ -3,16 +3,18 @@
 from __future__ import annotations
 
 from collections import defaultdict
+import re
 
 from secpol_audit.ir import (
     RESERVED_TYPES,
     Finding,
     IfsIR,
+    MountPointRule,
     PathAnalysisResult,
     PolicyIR,
     Severity,
 )
-from secpol_audit.paths import analyze_paths, collect_type_attaches
+from secpol_audit.paths import analyze_paths, collect_type_abilities, collect_type_attaches
 
 UNLOCK_PRIVILEGED_ABILITIES = frozenset(
     {
@@ -25,6 +27,133 @@ UNLOCK_PRIVILEGED_ABILITIES = frozenset(
         "gain_priv",
     }
 )
+
+INHERITABLE_PRIV_ABILITIES = frozenset(
+    {
+        "mem_phys",
+        "io",
+        "mac_policy",
+        "prot_exec",
+        "able_create",
+        "setuid",
+        "pathspace",
+    }
+)
+
+
+def _parse_uid_gid(spec: str | None) -> tuple[int | None, int | None]:
+    """Parse a QNX `on -u <uid>[:<gid>]` or `mount_point <uid>:<gid>` identity."""
+    if not spec:
+        return None, None
+    parts = spec.strip().split(":", 1)
+    uid_s = parts[0].strip()
+    gid_s = parts[1].strip() if len(parts) > 1 else ""
+
+    def _to_id(val: str) -> int | None:
+        if not val:
+            return None
+        if val == "root":
+            return 0
+        if val.isdigit():
+            return int(val)
+        return None
+
+    uid = _to_id(uid_s)
+    gid = _to_id(gid_s) if gid_s else uid
+    return uid, gid
+
+
+def _octal_digit_to_rwx(digit: int) -> str:
+    return (
+        ("r" if digit & 4 else "")
+        + ("w" if digit & 2 else "")
+        + ("x" if digit & 1 else "")
+    )
+
+
+def _eval_mount_acl(mp: MountPointRule, client_uid: int, client_gid: int) -> str | None:
+    """Return effective rwx characters for `(client_uid, client_gid)` under `mp`, or None if unparseable."""
+    owner_uid, owner_gid = _parse_uid_gid(mp.owner)
+    if owner_uid is None:
+        return None
+    if owner_gid is None:
+        owner_gid = owner_uid
+
+    perms = mp.perms.strip()
+    # 1. QNX ACL block: `{ u::rwx g::rx u:25:rw o::--- }`
+    # (Parser may join tokens with spaces around `:`, e.g. `{ u : : rwx g : : rx o : : rx }`)
+    if perms.startswith("{") and perms.endswith("}"):
+        inner = re.sub(r"\s*:\s*", ":", perms[1:-1].strip())
+        u_default = ""
+        g_default = ""
+        o_default = ""
+        u_named: dict[int, str] = {}
+        g_named: dict[int, str] = {}
+        for tok in inner.split():
+            m = re.match(r"^([ugo]):([^:]*):([rwx-]+)$", tok)
+            if not m:
+                continue
+            tag, ident, bits = m.group(1), m.group(2), m.group(3).replace("-", "")
+            if tag == "u":
+                if ident == "":
+                    u_default = bits
+                elif ident.isdigit():
+                    u_named[int(ident)] = bits
+                elif ident == "root":
+                    u_named[0] = bits
+            elif tag == "g":
+                if ident == "":
+                    g_default = bits
+                elif ident.isdigit():
+                    g_named[int(ident)] = bits
+                elif ident == "root":
+                    g_named[0] = bits
+            elif tag == "o":
+                o_default = bits
+        if client_uid == owner_uid:
+            return u_default
+        if client_uid in u_named:
+            return u_named[client_uid]
+        if client_gid == owner_gid:
+            return g_default
+        if client_gid in g_named:
+            return g_named[client_gid]
+        return o_default
+
+    # 2. 9-character symbolic POSIX mode: `rwxr-x---`, `r--r--r--`
+    if re.fullmatch(r"[r-][w-][xsStT-][r-][w-][xsStT-][r-][w-][xtT-]", perms):
+        u_bits = "".join(c for c in perms[0:3] if c in "rwx")
+        g_bits = "".join(c for c in perms[3:6] if c in "rwx")
+        o_bits = "".join(c for c in perms[6:9] if c in "rwx")
+        if client_uid == owner_uid:
+            return u_bits
+        if client_gid == owner_gid:
+            return g_bits
+        return o_bits
+
+    # 3. Octal POSIX mode: `0700`, `750`, `640`
+    if re.fullmatch(r"0?[0-7]{3}", perms):
+        digits = [int(ch) for ch in perms[-3:]]
+        if client_uid == owner_uid:
+            return _octal_digit_to_rwx(digits[0])
+        if client_gid == owner_gid:
+            return _octal_digit_to_rwx(digits[1])
+        return _octal_digit_to_rwx(digits[2])
+
+    return None
+
+
+def _path_under_or_equal(target_path: str, mount_path: str) -> tuple[bool, bool]:
+    """Return `(matches, is_strict_child)` for `target_path` relative to `mount_path`."""
+    t = target_path.rstrip("/") or "/"
+    m = mount_path.rstrip("/") or "/"
+    if t == m:
+        return True, False
+    if m == "/":
+        return True, True
+    if t.startswith(m + "/"):
+        return True, True
+    return False, False
 
 
 def run_ifs_checks(ifs: IfsIR, policy: PolicyIR | None = None) -> list[Finding]:
@@ -72,6 +201,11 @@ def run_ifs_checks(ifs: IfsIR, policy: PolicyIR | None = None) -> list[Finding]:
             )
 
     first_push_line = ifs.first_secpolpush_line
+    abilities_by_type = collect_type_abilities(policy) if policy is not None else {}
+    attaches_by_type = collect_type_attaches(policy) if policy is not None else {}
+
+    # Track non-root IFS service identities per declared type for mount ACL checks
+    nonroot_services_by_type: dict[str, list[tuple[int, int, str, object]]] = defaultdict(list)
 
     for cmd in ifs.commands:
         if cmd.is_secpolpush or cmd.is_builtin:
@@ -134,6 +268,143 @@ def run_ifs_checks(ifs: IfsIR, policy: PolicyIR | None = None) -> list[Finding]:
                         metadata={"executable": cmd.executable, "type": cmd.on_type},
                     )
                 )
+            else:
+                # 6. ROOT_SERVICE_WITHOUT_UID_DROP
+                uid, gid = _parse_uid_gid(cmd.on_user)
+                if uid is None or uid == 0:
+                    type_specs = [spec for spec, _ in abilities_by_type.get(cmd.on_type, [])]
+                    requires_root = any(
+                        spec.name == "setuid"
+                        and ("nonroot" not in spec.modifiers)
+                        and (not spec.args or any(a == "0" or a.startswith("0-") for a in spec.args))
+                        for spec in type_specs
+                    )
+                    if not requires_root:
+                        reason_txt = (
+                            "omits '-u <uid:gid>'"
+                            if cmd.on_user is None
+                            else f"runs as root ('-u {cmd.on_user}')"
+                        )
+                        findings.append(
+                            Finding(
+                                rule_id="ROOT_SERVICE_WITHOUT_UID_DROP",
+                                severity=Severity.HIGH,
+                                message=(
+                                    f"Service '{cmd.executable}' (type '{cmd.on_type}') at line {cmd.span.line} "
+                                    f"{reason_txt} and runs as uid=0 root unnecessarily"
+                                ),
+                                span=cmd.span,
+                                remediation=(
+                                    f"Drop root privileges by adding '-u <uid>:<gid>' (e.g., '-u 25:25') to "
+                                    f"'on -T {cmd.on_type} {cmd.executable}' and ensuring required abilities use 'nonroot'."
+                                ),
+                                metadata={
+                                    "executable": cmd.executable,
+                                    "type": cmd.on_type,
+                                    "on_user": cmd.on_user,
+                                },
+                            )
+                        )
+                else:
+                    nonroot_services_by_type[cmd.on_type].append(
+                        (uid, gid if gid is not None else uid, cmd.executable or "", cmd.span)
+                    )
+
+    # 7. NONROOT_MOUNT_ACL_MISMATCH: cross-reference non-root IFS services vs mount_point ACLs
+    if policy is not None and policy.mount_point_rules and nonroot_services_by_type:
+        # Collect concrete channel-connect targets per client type
+        client_targets: dict[str, set[str]] = defaultdict(set)
+        for crule in policy.connect_rules:
+            for src in crule.sources:
+                for c_src, _ in policy.expand_subject(src):
+                    if c_src not in policy.types:
+                        continue
+                    for tgt in crule.targets:
+                        expanded_tgts = (
+                            [(c_src, None)]
+                            if tgt == "self"
+                            else policy.expand_subject(tgt, allow_default_rules=False)
+                        )
+                        for c_tgt, _ in expanded_tgts:
+                            if c_tgt in policy.types:
+                                client_targets[c_src].add(c_tgt)
+
+        # Collect allow_link paths per concrete type
+        links_by_type: dict[str, list[str]] = defaultdict(list)
+        for lrule in policy.link_rules:
+            for t in lrule.types:
+                for c_t, _ in policy.expand_subject(t, allow_default_rules=False):
+                    if c_t in policy.types:
+                        links_by_type[c_t].extend(lrule.paths)
+
+        seen_acl_findings: set[tuple[str, str, int, int]] = set()
+        for mp in policy.mount_point_rules:
+            for mp_path in mp.paths:
+                for tname, svc_list in sorted(nonroot_services_by_type.items()):
+                    # Paths this non-root type needs to access via channel connect, allow_link, or attach
+                    accessed_paths: list[tuple[str, str]] = []  # (role, path)
+                    for srv_t in sorted(client_targets.get(tname, set())):
+                        for _ft, ap_path, _raw, _ct in attaches_by_type.get(srv_t, []):
+                            matches, _ = _path_under_or_equal(ap_path, mp_path)
+                            if matches:
+                                accessed_paths.append(
+                                    (f"channel connect to '{srv_t}' ({ap_path})", ap_path)
+                                )
+                    for lpath in links_by_type.get(tname, []):
+                        matches, _ = _path_under_or_equal(lpath, mp_path)
+                        if matches:
+                            accessed_paths.append((f"allow_link ({lpath})", lpath))
+                    for _ft, ap_path, _raw, _ct in attaches_by_type.get(tname, []):
+                        matches, is_child = _path_under_or_equal(ap_path, mp_path)
+                        if matches and is_child:
+                            accessed_paths.append((f"allow_attach ({ap_path})", ap_path))
+
+                    if not accessed_paths:
+                        continue
+
+                    for uid, gid, exe_name, cmd_span in svc_list:
+                        eff = _eval_mount_acl(mp, uid, gid)
+                        if eff is None:
+                            continue
+                        for role_desc, target_path in accessed_paths:
+                            _, is_child = _path_under_or_equal(target_path, mp_path)
+                            # Traversing a parent mount directory requires `x`; accessing the exact mount requires any r/w/x
+                            denied = ("x" not in eff) if is_child else (eff == "")
+                            if denied:
+                                dedup_key = (tname, mp_path, uid, gid)
+                                if dedup_key in seen_acl_findings:
+                                    continue
+                                seen_acl_findings.add(dedup_key)
+                                need_bits = "rx" if is_child else "r"
+                                findings.append(
+                                    Finding(
+                                        rule_id="NONROOT_MOUNT_ACL_MISMATCH",
+                                        severity=Severity.MEDIUM,
+                                        message=(
+                                            f"Non-root service '{exe_name}' (type '{tname}', -u {uid}:{gid}) accesses "
+                                            f"{role_desc} under mount_point '{mp_path}' ({mp.owner} {mp.perms}), "
+                                            f"which grants effective '{eff or '---'}' — statically predicted silent EACCES"
+                                        ),
+                                        span=mp.span,
+                                        remediation=(
+                                            f"Grant uid {uid}:gid {gid} access on '{mp_path}', e.g. "
+                                            f"'mount_point {mp.owner} {{ u::rwx g::rx u:{uid}:{need_bits} o::--- }} {mp_path};' "
+                                            f"or align the service gid with {mp.owner}."
+                                        ),
+                                        metadata={
+                                            "executable": exe_name,
+                                            "type": tname,
+                                            "uid": uid,
+                                            "gid": gid,
+                                            "mount_path": mp_path,
+                                            "mount_owner": mp.owner,
+                                            "mount_perms": mp.perms,
+                                            "effective_perms": eff or "---",
+                                            "target_path": target_path,
+                                            "ifs_location": cmd_span.format_loc(),
+                                        },
+                                    )
+                                )
 
     return findings
 
@@ -469,6 +740,48 @@ def run_policy_checks(policy: PolicyIR) -> list[Finding]:
                         "or if this attach rule is stale."
                     ),
                     metadata={"type": tname, "paths": [r for r, _ in dev_list]},
+                )
+            )
+
+    # Check CHILD_ABILITY_INHERITANCE_LEAK: privileged type that can spawn children
+    # (`settypeid` or `spawn`) without `noinherit` or `default_spawn_type`
+    types_with_default_spawn: set[str] = set()
+    for srule in policy.default_spawn_rules:
+        for concrete_src, _ in policy.expand_subject(srule.src_type, allow_default_rules=False):
+            types_with_default_spawn.add(concrete_src)
+
+    abilities_by_type = collect_type_abilities(policy)
+    for tname in sorted(policy.types):
+        if tname in types_with_default_spawn:
+            continue
+        specs = [spec for spec, _ in abilities_by_type.get(tname, [])]
+        can_spawn = any(spec.name in ("settypeid", "spawn") for spec in specs)
+        if not can_spawn:
+            continue
+        leaked_specs = [
+            spec
+            for spec in specs
+            if spec.name in INHERITABLE_PRIV_ABILITIES and "noinherit" not in spec.modifiers
+        ]
+        if leaked_specs:
+            leaked_names = sorted({spec.canonical() for spec in leaked_specs})
+            findings.append(
+                Finding(
+                    rule_id="CHILD_ABILITY_INHERITANCE_LEAK",
+                    severity=Severity.HIGH,
+                    message=(
+                        f"Privileged type '{tname}' can spawn children without 'default_spawn_type' and "
+                        f"lacks 'noinherit' on privileged ability(ies): {', '.join(leaked_names)}"
+                    ),
+                    span=leaked_specs[0].span,
+                    remediation=(
+                        f"Mark privileged abilities on '{tname}' with 'noinherit' (e.g., 'noinherit {leaked_specs[0].name}') "
+                        f"or declare 'default_spawn_type {tname} <restricted_child_t>;' so spawned children do not inherit them."
+                    ),
+                    metadata={
+                        "type": tname,
+                        "leaked_abilities": leaked_names,
+                    },
                 )
             )
 

@@ -13,11 +13,13 @@ from secpol_audit.checks import run_all_checks
 from secpol_audit.compile_wrap import CompileResult, run_secpolcompile
 from secpol_audit.diff import PolicyDiffResult, diff_policies
 from secpol_audit.events import correlate_events, parse_events_file
+from secpol_audit.firmware import ElfParseError, audit_firmware
 from secpol_audit.graph_html import render_html_report, render_svg_preview
 from secpol_audit.ir import Finding, ParseDiagnostic
 from secpol_audit.parser_ifs import parse_ifs_file
 from secpol_audit.parser_secpol import parse_secpol_file
 from secpol_audit.paths import analyze_paths
+from secpol_audit.remediate import remediate_policy_text
 from secpol_audit.runtime import parse_pidin_file, verify_runtime
 from secpol_audit.sarif import findings_to_sarif_json
 
@@ -420,7 +422,144 @@ def build_parser() -> argparse.ArgumentParser:
     p_ev.add_argument("--svg", help="Write static standalone SVG graph badging trace-verified edges")
     p_ev.set_defaults(func=_cmd_verify_events)
 
+    # fix
+    p_fix = sub.add_parser(
+        "fix",
+        help="Compute Edmonds-Karp weighted minimum-cut remediation for escalation chains in a .secpol policy",
+    )
+    p_fix.add_argument("secpol", help="Path to QNX 8.0 .secpol policy file")
+    p_fix.add_argument("--ifs", help="Optional path to matching QNX 8.0 build.ifs file")
+    p_fix.add_argument("--out", help="Write remediated .secpol policy to this file path")
+    p_fix.add_argument("--patch", action="store_true", help="Emit unified diff patch to stdout")
+    p_fix.add_argument("--format", choices=("text", "json"), default="text", help="Output format")
+    p_fix.add_argument("--output", "-o", help="Write summary/patch output to file instead of stdout")
+    p_fix.set_defaults(func=_cmd_fix)
+
+    # audit-firmware
+    p_fw = sub.add_parser(
+        "audit-firmware",
+        help="Cross-layer QNX ELF64 binary hardening & compiled policy auditor",
+    )
+    p_fw.add_argument("secpol", help="Path to QNX 8.0 .secpol policy file")
+    p_fw.add_argument("--ifs", required=True, help="Path to matching QNX 8.0 build.ifs file")
+    p_fw.add_argument("--bin-dir", required=True, help="Directory containing service ELF64 binaries")
+    p_fw.add_argument("--secpol-bin", help="Optional path to compiled secpol.bin artifact")
+    p_fw.add_argument("--secpol-info", help="Optional path to captured `secpolinfo` text output")
+    p_fw.add_argument("--format", choices=("text", "json", "sarif"), default="text", help="Output format")
+    p_fw.add_argument("--output", "-o", help="Write output to file instead of stdout")
+    p_fw.set_defaults(func=_cmd_audit_firmware)
+
     return parser
+
+
+def _cmd_fix(args: argparse.Namespace) -> int:
+    policy_path = Path(args.secpol)
+    if not policy_path.is_file():
+        sys.stderr.write(f"ERROR: policy file not found: {policy_path}\n")
+        return 2
+    ifs = None
+    if args.ifs:
+        ifs_path = Path(args.ifs)
+        if not ifs_path.is_file():
+            sys.stderr.write(f"ERROR: IFS file not found: {ifs_path}\n")
+            return 2
+        ifs = parse_ifs_file(ifs_path)
+
+    raw_text = policy_path.read_text(encoding="utf-8")
+    res = remediate_policy_text(raw_text, str(policy_path), ifs=ifs)
+
+    if args.out:
+        out_path = Path(args.out)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(res.fixed_text, encoding="utf-8")
+
+    if args.format == "json":
+        payload = res.to_dict()
+        if args.out:
+            payload["written_to"] = str(args.out)
+        _write_output(json.dumps(payload, indent=2), args.output)
+    elif args.patch:
+        _write_output(res.unified_diff or "# No changes required (0 escalation chains).\n", args.output)
+    else:
+        lines: list[str] = [f"secpol-audit fix: {policy_path}"]
+        if res.already_clean:
+            lines.append("Result: ALREADY CLEAN (0 escalation chains; no edits required)")
+        else:
+            lines.append(
+                f"Escalation chains: {res.before_chains} -> {res.after_chains} | "
+                f"Min-cut weight: {res.total_cut_weight} | "
+                f"Cut edges: {len(res.cut_edges)} | "
+                f"Preserved REVIEW_ONLY edges: {res.preserved_review_edges}"
+            )
+            for c in res.cut_edges:
+                lines.append(
+                    f"  CUT [{','.join(c.kinds)}] {c.source} -> {c.target} (weight={c.weight})"
+                )
+            for gp in res.pruned_gain_priv:
+                lines.append(
+                    f"  PRUNE orphaned gain_priv on {gp.subject}: removed {','.join(gp.removed_args)}"
+                )
+            if args.out:
+                lines.append(f"Wrote remediated policy to: {args.out}")
+            if res.unified_diff:
+                lines.append("")
+                lines.append(res.unified_diff.rstrip("\n"))
+        _write_output("\n".join(lines), args.output)
+
+    return 0 if res.after_chains == 0 else 1
+
+
+def _cmd_audit_firmware(args: argparse.Namespace) -> int:
+    policy_path = Path(args.secpol)
+    ifs_path = Path(args.ifs)
+    bin_dir = Path(args.bin_dir)
+    if not policy_path.is_file():
+        sys.stderr.write(f"ERROR: policy file not found: {policy_path}\n")
+        return 2
+    if not ifs_path.is_file():
+        sys.stderr.write(f"ERROR: IFS file not found: {ifs_path}\n")
+        return 2
+    if not bin_dir.is_dir():
+        sys.stderr.write(f"ERROR: binary directory not found: {bin_dir}\n")
+        return 2
+    if args.secpol_bin and not Path(args.secpol_bin).is_file():
+        sys.stderr.write(f"ERROR: secpol binary not found: {args.secpol_bin}\n")
+        return 2
+    if args.secpol_info and not Path(args.secpol_info).is_file():
+        sys.stderr.write(f"ERROR: secpolinfo file not found: {args.secpol_info}\n")
+        return 2
+
+    policy = parse_secpol_file(policy_path)
+    ifs = parse_ifs_file(ifs_path)
+    try:
+        res = audit_firmware(
+            policy,
+            ifs,
+            bin_dir,
+            policy_source_path=policy_path,
+            secpol_bin=args.secpol_bin,
+            secpol_info_path=args.secpol_info,
+        )
+    except ElfParseError as exc:
+        sys.stderr.write(f"ERROR [ELF_PARSE_ERROR]: {exc}\n")
+        return 2
+
+    if args.format == "sarif":
+        _write_output(
+            findings_to_sarif_json(res.findings, default_uri=str(policy_path)),
+            args.output,
+        )
+    elif args.format == "json":
+        _write_output(json.dumps(res.to_dict(), indent=2), args.output)
+    else:
+        header = (
+            f"secpol-audit audit-firmware: {policy_path} + {ifs_path} + {bin_dir}\n"
+            f"ELF64 binaries scanned: {len(res.binaries_scanned)} | "
+            f"Unresolved IFS services: {len(res.missing_binaries)}"
+        )
+        _write_output(_format_findings_text(res.findings, header=header), args.output)
+
+    return 1 if res.findings else 0
 
 
 def main(argv: Sequence[str] | None = None) -> int:

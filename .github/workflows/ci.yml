@@ -103,3 +103,47 @@ jobs:
           assert "http://" not in html_doc and "https://" not in html_doc
           print("verify-events smoke-test passed (SARIF + offline HTML/SVG KERNEL TRACE VERIFIED)")
           PY
+
+      - name: Verify real QNX 8.0 libsecpolev telemetry logs (M0_sentry_clean + M3_sentry_escalate)
+        run: |
+          secpol-audit verify-events qnx_demo/mutants/M0_sentry_clean.secpol \
+            --log evidence/qemu_logs/M0_sentry_clean.log \
+            --ifs qnx_demo/build_sentry.ifs.in
+
+          set +e
+          secpol-audit verify-events qnx_demo/mutants/M3_sentry_escalate.secpol \
+            --log evidence/qemu_logs/M3_sentry_escalate.log \
+            --ifs qnx_demo/build_sentry.ifs.in \
+            --format sarif \
+            --output /tmp/real_sentry_m3.sarif.json
+          rc=$?
+          set -e
+          test "$rc" -eq 1
+
+          python3 - <<'PY'
+          import json
+          doc = json.load(open("/tmp/real_sentry_m3.sarif.json", encoding="utf-8"))
+          assert doc["version"] == "2.1.0"
+          results = doc["runs"][0]["results"]
+          assert [r["ruleId"] for r in results] == ["KERNEL_TRACE_ESCALATION_OBSERVED"]
+          assert "ivi_ui_t -> diag_helper_t -> can_hal_t" in results[0]["message"]["text"]
+          print("Real QNX 8.0 libsecpolev verification passed (M0 exit 0, M3 exit 1)")
+          PY
+
+      - name: Smoke-test secpol-audit fix (Edmonds-Karp min-cut auto-remediation)
+        run: |
+          secpol-audit fix examples/adas_12svc.secpol --out /tmp/adas_fixed_auto.secpol --format json > /tmp/adas_fix.json
+          secpol-audit paths /tmp/adas_fixed_auto.secpol
+
+          secpol-audit fix qnx_demo/mutants/M3_2hop_escalate.secpol --out /tmp/m3_fixed_auto.secpol --patch
+          secpol-audit paths /tmp/m3_fixed_auto.secpol
+
+          python3 - <<'PY'
+          import json
+          res = json.load(open("/tmp/adas_fix.json", encoding="utf-8"))
+          assert res["verified_zero_escalation"] is True
+          assert res["before_escalation_chains"] == 1
+          assert res["after_escalation_chains"] == 0
+          print("secpol-audit fix smoke-test passed (0 escalation chains verified)")
+          PY
+

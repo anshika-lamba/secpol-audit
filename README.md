@@ -42,9 +42,33 @@ M3_fixed             | PASS (0 chains, 0 wiring errors)           | direct=DENIE
 ```
 
 > **QEMU TCG & Honesty Disclosure:**
-> - All 5 logs in `evidence/qemu_logs/*.log` are real QNX Neutrino 8.0 x86_64 QEMU TCG (`-accel tcg -nographic`) serial captures built with QNX SDP 8.0 (`qcc`, `secpolcompile`, `mkifs`). QEMU software emulation (`-accel tcg`) is used intentionally so live target verification reproduces cleanly on WSL2, CI runners, and laptops without KVM prerequisites.
+> - All 7 logs in `evidence/qemu_logs/*.log` (5 mutant captures + 2 `libsecpolev` Sentry captures) are real QNX Neutrino 8.0 x86_64 QEMU TCG (`-accel tcg -nographic`) serial captures built with QNX SDP 8.0 (`qcc`, `secpolcompile`, `mkifs`). QEMU software emulation (`-accel tcg`) is used intentionally so live target verification reproduces cleanly on WSL2, CI runners, and laptops without KVM prerequisites.
 > - Synthetic unit-test fixtures live separately in `tests/fixtures/sample_qemu_logs/` (`make verify-fixtures`, also `5/5 MATCH`).
-> - When `secpolcompile` is absent on a host machine, `secpol-audit` explicitly reports **`skipped`**—never `pass`.
+> - When `secpolcompile` or `secpolinfo` is absent on a host machine, `secpol-audit` explicitly reports **`skipped`**—never `pass`.
+
+### Live QNX 8.0 `libsecpolev` Kernel Telemetry Verification (`secpol-audit verify-events`)
+
+In addition to `pidin -f a_n` snapshot verification, [`qnx_demo/secpol_sentry.c`](qnx_demo/secpol_sentry.c) runs natively inside QNX Neutrino 8.0 using `libsecpolev` (`secpolev_init()` + `secpolev_process()`) and `/dev/secpol_sentry` (`secpol_resmgr_attach()` + `secpol_check_permission()` for custom class `sentry { read_events }`):
+
+| Real QNX 8.0 Log | `libsecpolev` Stats | `secpol-audit verify-events` Verdict | Custom Class `sentry` |
+| :--- | :--- | :--- | :--- |
+| [`M0_sentry_clean.log`](evidence/qemu_logs/M0_sentry_clean.log) | `222` events (`ok=219`, `denied=3`, **`dropped=0`**) | **PASS** (`0` findings, `0` verified escalation edges, exit `0`) | `audit_reader_t`: `OK` / `ivi_ui_t`: `DENIED` |
+| [`M3_sentry_escalate.log`](evidence/qemu_logs/M3_sentry_escalate.log) | `270` events (`ok=268`, `denied=2`, **`dropped=0`**) | **CRITICAL `KERNEL_TRACE_ESCALATION_OBSERVED`**: `ivi_ui_t -> diag_helper_t -> can_hal_t` (2/2 hops fired `OK`, exit `1`) | `audit_reader_t`: `OK` / `ivi_ui_t`: `DENIED` |
+
+---
+
+## Phase 2: State-Space Formal Checks, Weighted Min-Cut `fix`, and ELF64 `audit-firmware`
+
+1. **State-Space Policy & IFS Security Solver (`secpol_audit/checks.py`):**
+   - **`CHILD_ABILITY_INHERITANCE_LEAK` (`HIGH`):** Flags privileged types holding `mem_phys`, `io`, `mac_policy`, `prot_exec`, `able_create`, `setuid`, or `pathspace` that can spawn children (`settypeid` or `spawn`) without `noinherit` or `default_spawn_type`.
+   - **`ROOT_SERVICE_WITHOUT_UID_DROP` (`HIGH`):** Flags `build.ifs` `on -T <type>` service launches that omit `-u <uid:gid>` or run as `uid=0` unnecessarily.
+   - **`NONROOT_MOUNT_ACL_MISMATCH` (`MEDIUM`):** Cross-references non-root `-u <uid:gid>` IFS services against `mount_point` permissions (POSIX 9-char, octal, and QNX ACL blocks) and `allow_attach`/`channel connect`/`allow_link` targets to statically predict silent `EACCES` failures and suggest the exact `mount_point` ACL.
+2. **Weighted Minimum-Cut Auto-Remediation (`secpol-audit fix`):**
+   - Pure-Python Edmonds-Karp max-flow / min-cut over the `ESCALATION` subgraph (`settypeid`, `derive_type`, `default_spawn_type`) — `REVIEW_ONLY` (`channel connect`) edges are **never** cut.
+   - Disconnects every strictly lower-privilege ancestor from every privileged sink (e.g., severing `diag_helper_t -> can_hal_t` in 1 cut on `adas_12svc.secpol` and `M3_2hop_escalate.secpol`), prunes orphaned `gain_priv` entries, emits a unified diff (`--patch`) or rewritten policy (`--out`), and re-verifies **0 escalation chains**.
+3. **Pure-Python QNX ELF64 & Compiled Policy Cross-Layer Auditor (`secpol-audit audit-firmware`):**
+   - Stdlib `struct.unpack_from` ELF64 parser (`EM_X86_64`, `EM_AARCH64`) checking PIE (`ET_DYN`), NX (`PT_GNU_STACK`), RELRO (`PT_GNU_RELRO` + `DT_BIND_NOW`), `DT_NEEDED` (`libsecpol.so*`, `libsecpolev.so*`), and `.dynsym` symbols (`secpol_transition_type`, `secpol_posix_spawnattr_settypeid`, `secpol_resmgr_attach`, `secpol_check_permission`, `secpolev_init`).
+   - Cross-layer rules: **`HIGH_PRIV_UNHARDENED_ELF`** (`HIGH`/`CRITICAL`), **`UNREACHABLE_TRANSITION_API`** (`HIGH`), **`UNUSED_SETTYPEID_SURFACE`** (`MEDIUM`), plus optional `--secpol-bin` / `--secpol-info` checks (**`MUTABLE_COMPILED_POLICY`**, **`ZERO_POLICY_ID`**, **`POLICY_SOURCE_DRIFT`**).
 
 ---
 
@@ -97,12 +121,25 @@ secpol-audit paths examples/adas_12svc.secpol \
 secpol-audit diff examples/adas_12svc.secpol examples/adas_12svc_fixed.secpol
 # -> Escalation chains: -1 escalation chain (0 remaining) (exits 0)
 
-# 4. Verify runtime `pidin -f a_n` snapshot against static policy & IFS
+# 4. Verify runtime `pidin -f a_n` snapshot or live `libsecpolev` kernel telemetry
 secpol-audit verify-runtime tests/fixtures/sample_qemu_logs/pidin_drift.log \
   --policy examples/adas_12svc_fixed.secpol \
   --ifs examples/adas_12svc_fixed.ifs
 
-# 5. Run the full automated test suite (84 passing tests) & offline log verifiers
+secpol-audit verify-events qnx_demo/mutants/M3_sentry_escalate.secpol \
+  --log evidence/qemu_logs/M3_sentry_escalate.log \
+  --ifs qnx_demo/build_sentry.ifs.in
+
+# 5. Edmonds-Karp weighted min-cut auto-remediation (0 escalation chains verified)
+secpol-audit fix examples/adas_12svc.secpol --out /tmp/adas_fixed.secpol --patch
+
+# 6. Cross-layer ELF64 binary hardening & compiled policy audit (SARIF 2.1.0)
+secpol-audit audit-firmware examples/adas_12svc_fixed.secpol \
+  --ifs examples/adas_12svc_fixed.ifs \
+  --bin-dir /path/to/qnx_bins \
+  --format sarif
+
+# 7. Run the full automated test suite (144 passing tests) & offline log verifiers
 make test
 make verify-offline
 make verify-fixtures

@@ -94,6 +94,47 @@ RULE_DESCRIPTIONS: dict[str, tuple[str, str]] = {
         "libsecpolev recorded a DENIED verdict on a declared service type for an ability, attach path, "
         "or custom permission that is explicitly granted in the audited .secpol policy.",
     ),
+    "CHILD_ABILITY_INHERITANCE_LEAK": (
+        "Privileged type leaks inheritable abilities to spawned child processes",
+        "A privileged QNX type holding mem_phys, io, mac_policy, prot_exec, able_create, setuid, or "
+        "pathspace can spawn children without marking those abilities `noinherit` or setting `default_spawn_type`.",
+    ),
+    "ROOT_SERVICE_WITHOUT_UID_DROP": (
+        "IFS service runs as uid=0 root unnecessarily",
+        "A typed `on -T <type>` service launch in build.ifs omits `-u <uid:gid>` or explicitly runs as uid=0.",
+    ),
+    "NONROOT_MOUNT_ACL_MISMATCH": (
+        "Non-root IFS service blocked by mount_point ACL (predicted silent EACCES)",
+        "Cross-referencing a non-root `on -T <type> -u <uid:gid>` service against `mount_point` permissions "
+        "and its `allow_attach`/`channel connect`/`allow_link` targets shows the service lacks required access bits.",
+    ),
+    "HIGH_PRIV_UNHARDENED_ELF": (
+        "Privileged QNX service binary missing ELF64 hardening mitigations",
+        "An ELF64 binary launched under a privileged QNX security type lacks PIE (ET_DYN), "
+        "non-executable stack (PT_GNU_STACK without PF_X), or RELRO (PT_GNU_RELRO).",
+    ),
+    "UNREACHABLE_TRANSITION_API": (
+        "Binary imports libsecpol transition APIs without matching policy settypeid grants",
+        "An ELF64 binary dynamically references secpol_transition_type or secpol_posix_spawnattr_settypeid, "
+        "but its bound QNX security type has no settypeid transition permissions.",
+    ),
+    "UNUSED_SETTYPEID_SURFACE": (
+        "Policy grants settypeid to a type whose binary never imports transition APIs",
+        "The .secpol policy grants settypeid transition capability to a type, but its ELF64 binary does not "
+        "link libsecpol or import secpol_transition_type/secpol_posix_spawnattr_settypeid (dead attack surface).",
+    ),
+    "MUTABLE_COMPILED_POLICY": (
+        "Compiled secpol binary reports mutable policy state (secpolcompile -m)",
+        "secpolinfo output indicates a mutable compiled policy, which should be disabled in production builds.",
+    ),
+    "ZERO_POLICY_ID": (
+        "Compiled secpol binary has zero policy ID",
+        "secpolinfo reports policy ID 0, indicating unversioned/untracked compiled security policy artifacts.",
+    ),
+    "POLICY_SOURCE_DRIFT": (
+        "Source .secpol does not match compiled secpol binary metadata",
+        "Compiled policy binary or secpolinfo metadata diverges from the audited source .secpol file.",
+    ),
 }
 
 
