@@ -42,7 +42,7 @@
 #define SENTRY_PERM_READ    "read_events"
 
 #define RING_CAPACITY       64
-#define EVENT_BUF_SIZE      1024
+#define EVENT_BUF_SIZE      2048
 #define MAX_CHAIN_LEN       16
 #define MAX_TYPE_NAME       64
 #define MAX_TRACKED_TYPES   32
@@ -233,14 +233,22 @@ static void emit_multihop_alert_locked(uint64_t ts_ns) {
     if (n > 0 && (size_t)n < sizeof(alert_buf)) {
         pos = (size_t)n;
     }
-    for (size_t i = 0; i < g_state.hop_chain_len && pos + 8 < sizeof(alert_buf); ++i) {
+    for (size_t i = 0; i < g_state.hop_chain_len; ++i) {
         char esc[MAX_TYPE_NAME * 2];
         json_escape(g_state.hop_chain[i], esc, sizeof(esc));
-        n = snprintf(alert_buf + pos, sizeof(alert_buf) - pos,
-                     "%s\"%s\"", (i > 0) ? "," : "", esc);
-        if (n > 0 && (size_t)n < sizeof(alert_buf) - pos) {
-            pos += (size_t)n;
+        size_t esc_len = strlen(esc);
+        size_t need = (i > 0 ? 1U : 0U) + 2U + esc_len;
+        if (pos + need + 40U >= sizeof(alert_buf)) {
+            break;
         }
+        if (i > 0) {
+            alert_buf[pos++] = ',';
+        }
+        alert_buf[pos++] = '"';
+        memcpy(alert_buf + pos, esc, esc_len);
+        pos += esc_len;
+        alert_buf[pos++] = '"';
+        alert_buf[pos] = '\0';
     }
     (void)snprintf(alert_buf + pos, sizeof(alert_buf) - pos,
                    "],\"ts_ns\":%" PRIu64 "}", ts_ns);
@@ -507,16 +515,19 @@ static size_t build_sentry_summary_json(char *buf, size_t buf_size) {
                            ? (size_t)((g_state.ring_written - max_emit) % RING_CAPACITY)
                            : 0;
 
-    for (size_t i = 0; i < max_emit && pos + 8 < buf_size; ++i) {
+    for (size_t i = 0; i < max_emit; ++i) {
         size_t idx = (start_idx + i) % RING_CAPACITY;
         size_t ev_len = strlen(g_state.ring[idx]);
-        if (pos + ev_len + 16 >= buf_size) {
+        size_t need = (i > 0 ? 1U : 0U) + ev_len;
+        if (pos + need + 16U >= buf_size) {
             break;
         }
-        n = snprintf(buf + pos, buf_size - pos, "%s%s", (i > 0) ? "," : "", g_state.ring[idx]);
-        if (n > 0 && (size_t)n < buf_size - pos) {
-            pos += (size_t)n;
+        if (i > 0) {
+            buf[pos++] = ',';
         }
+        memcpy(buf + pos, g_state.ring[idx], ev_len);
+        pos += ev_len;
+        buf[pos] = '\0';
     }
 
     if (pos + 4 < buf_size) {
