@@ -40,6 +40,9 @@ $(BUILD_DIR)/ivi_exploit: ivi_exploit.c | $(BUILD_DIR)
 $(BUILD_DIR)/secpol_sentry: secpol_sentry.c | $(BUILD_DIR)
 	$(CC) $(TARGET_FLAGS) $(CFLAGS) -o $@ $< -lsecpolev $(LDFLAGS)
 
+$(BUILD_DIR)/dump_file: dump_file.c | $(BUILD_DIR)
+	$(CC) $(TARGET_FLAGS) $(CFLAGS) -o $@ $<
+
 sentry-binaries: check-sdp $(SENTRY_BINS)
 
 # Compile mutant policies
@@ -104,7 +107,7 @@ images: check-sdp $(addprefix $(BUILD_DIR)/,$(addsuffix .ifs,$(MUTANTS)))
 
 sentry-images: check-sdp $(addprefix $(BUILD_DIR)/,$(addsuffix .ifs,$(SENTRY_MUTANTS)))
 
-$(BUILD_DIR)/secpolgen_capture.ifs: secpolgen_capture.ifs $(BUILD_DIR)/can_server
+$(BUILD_DIR)/secpolgen_capture.ifs: secpolgen_capture.ifs $(BUILD_DIR)/can_server $(BUILD_DIR)/dump_file
 	$(MKIFS) $< $@
 
 secpolgen-image: check-sdp $(BUILD_DIR)/secpolgen_capture.ifs

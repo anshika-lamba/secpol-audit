@@ -30,15 +30,15 @@
     display_msg "=== PIDIN_END ==="
 
     display_msg "=== SECPOLGEN_POLICY_BEGIN ==="
-    cat /dev/secpolgenerate/policy
+    /proc/boot/dump_file /dev/secpolgenerate/policy
     display_msg "=== SECPOLGEN_POLICY_END ==="
 
     display_msg "=== SECPOLGEN_UNUSED_BEGIN ==="
-    cat /dev/secpolgenerate/unused
+    /proc/boot/dump_file /dev/secpolgenerate/unused
     display_msg "=== SECPOLGEN_UNUSED_END ==="
 
     display_msg "=== SECPOLGEN_ERRORS_BEGIN ==="
-    cat /dev/secpolgenerate/errors
+    /proc/boot/dump_file /dev/secpolgenerate/errors
     display_msg "=== SECPOLGEN_ERRORS_END ==="
 
     display_msg "=== SECPOL_AUDIT_DONE ==="
@@ -52,8 +52,8 @@ libsecpol.so=libsecpol-gen.so.1
 /proc/boot/secpolpush=secpolpush
 /proc/boot/on=on
 /proc/boot/pidin=pidin
-/proc/boot/cat=cat
 /proc/boot/slogger2=slogger2
 /proc/boot/pipe=pipe
 /proc/boot/random=random
 /proc/boot/can_server=build/can_server
+/proc/boot/dump_file=build/dump_file
