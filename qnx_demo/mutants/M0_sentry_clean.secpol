@@ -40,6 +40,7 @@ allow ivi_ui_t diag_helper_t : channel connect;
 
 # Native QNX 8.0 libsecpolev telemetry resource manager (`secpol_sentry`)
 allow_attach secpol_sentry_t /dev/secpol_sentry;
+allow_attach secpol_sentry_t /dev/name/local/_tracelog;
 mount_point 0:0 r--r--r-- /dev/secpol_sentry;
 allow secpol_sentry_t self:ability {
     nonroot
