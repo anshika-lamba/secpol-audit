@@ -1,0 +1,69 @@
+name: QNX 8.0 Live QEMU Sentry
+
+on:
+  workflow_dispatch:
+
+jobs:
+  qemu-sentry:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install QEMU x86_64 and host deps
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq qemu-system-x86 make
+          python3 -m pip install -q gdown -e ".[dev]"
+
+      - name: Download & install QNX SDP 8.0 headlessly
+        env:
+          MYQNX_USER: ${{ secrets.MYQNX_USER }}
+          MYQNX_PASSWORD: ${{ secrets.MYQNX_PASSWORD }}
+          MYQNX_LICENSE_KEY: ${{ secrets.MYQNX_LICENSE_KEY }}
+          GDRIVE_ID: ${{ secrets.QNX_INSTALLER_GDRIVE_ID }}
+        run: |
+          gdown --id "$GDRIVE_ID" -O /tmp/qnx-setup.run
+          chmod +x /tmp/qnx-setup.run
+          /tmp/qnx-setup.run --noexec --target /tmp/qsc_extract
+          CLT=/tmp/qsc_extract/qnxsoftwarecenter/qnxsoftwarecenter_clt
+          "$CLT" -myqnx.user "$MYQNX_USER" -myqnx.password "$MYQNX_PASSWORD" -syncLicenseKeys
+          if [ -n "$MYQNX_LICENSE_KEY" ]; then
+            "$CLT" -myqnx.user "$MYQNX_USER" -myqnx.password "$MYQNX_PASSWORD" -activateLicenseKey "$MYQNX_LICENSE_KEY" || true
+          fi
+          "$CLT" -myqnx.user "$MYQNX_USER" -myqnx.password "$MYQNX_PASSWORD" -mirror
+          "$CLT" -myqnx.user "$MYQNX_USER" -myqnx.password "$MYQNX_PASSWORD" \
+            -installBaseline com.qnx.qnx800 -destination /tmp/qnx800 -cleanInstall
+
+      - name: Build secpol_sentry and boot QNX 8.0 QEMU TCG
+        shell: bash
+        run: |
+          source /tmp/qnx800/qnxsdp-env.sh
+          which qcc secpolcompile mkifs qemu-system-x86_64
+          make qemu-sentry
+
+      - name: Inspect and verify real libsecpolev logs
+        if: always()
+        run: |
+          for f in evidence/qemu_logs/M0_sentry_clean.log evidence/qemu_logs/M3_sentry_escalate.log; do
+            if [ -f "$f" ]; then
+              echo "================ $f ================"
+              cat "$f"
+            fi
+          done
+          if [ -f evidence/qemu_logs/M3_sentry_escalate.log ]; then
+            secpol-audit verify-events qnx_demo/mutants/M3_sentry_escalate.secpol --log evidence/qemu_logs/M3_sentry_escalate.log || true
+          fi
+          if [ -f evidence/qemu_logs/M0_sentry_clean.log ]; then
+            secpol-audit verify-events qnx_demo/mutants/M0_sentry_clean.secpol --log evidence/qemu_logs/M0_sentry_clean.log || true
+          fi
+
+      - name: Upload real QNX 8.0 sentry logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qnx8-sentry-qemu-logs
+          path: |
+            evidence/qemu_logs/M0_sentry_clean.log
+            evidence/qemu_logs/M3_sentry_escalate.log
+          if-no-files-found: warn
