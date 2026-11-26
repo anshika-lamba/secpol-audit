@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+import fnmatch
 import re
 
 from secpol_audit.ir import (
@@ -14,7 +15,13 @@ from secpol_audit.ir import (
     PolicyIR,
     Severity,
 )
-from secpol_audit.paths import analyze_paths, collect_type_abilities, collect_type_attaches
+from secpol_audit.paths import (
+    DEFAULT_PRIVILEGED_ATTACH_PATTERNS,
+    analyze_paths,
+    collect_type_abilities,
+    collect_type_attaches,
+    is_privileged_ability,
+)
 
 UNLOCK_PRIVILEGED_ABILITIES = frozenset(
     {
@@ -154,6 +161,26 @@ def _path_under_or_equal(target_path: str, mount_path: str) -> tuple[bool, bool]
     if t.startswith(m + "/"):
         return True, True
     return False, False
+
+
+def _wildcard_path_overlaps(wild_path: str, target_path: str) -> bool:
+    """Return True if QNX wildcard attach/link path (`*` or `...`) overlaps `target_path`."""
+    w = wild_path.split(":", 1)[1] if ":" in wild_path else wild_path
+    t = target_path.split(":", 1)[1] if ":" in target_path else target_path
+    if "*" not in w and "..." not in w:
+        return False
+    if w.endswith("..."):
+        prefix = w[:-3].rstrip("/")
+        if not prefix:
+            return True
+        return t == prefix or t.startswith(prefix + "/")
+    if fnmatch.fnmatch(t, w):
+        return True
+    # Treat trailing `/*` as subtree prefix overlap as well
+    if w.endswith("/*"):
+        prefix = w[:-2].rstrip("/")
+        return t == prefix or t.startswith(prefix + "/")
+    return False
 
 
 def run_ifs_checks(ifs: IfsIR, policy: PolicyIR | None = None) -> list[Finding]:
@@ -784,6 +811,74 @@ def run_policy_checks(policy: PolicyIR) -> list[Finding]:
                     },
                 )
             )
+
+    # Check PATHSPACE_HIJACK_OVERLAP (CRITICAL): lower-privilege type's wildcard
+    # `allow_attach` / `allow_link` (`*` or `...`) overlaps a privileged type's attached path
+    priv_types: set[str] = set()
+    for tname in policy.types:
+        if any(is_privileged_ability(spec)[0] for spec, _ in abilities_by_type.get(tname, [])):
+            priv_types.add(tname)
+            continue
+        for ftype, ap_path, _raw, _ct in attaches_by_type.get(tname, []):
+            if ftype == "*" or any(
+                fnmatch.fnmatch(ap_path, pat) for pat in DEFAULT_PRIVILEGED_ATTACH_PATTERNS
+            ):
+                priv_types.add(tname)
+                break
+
+    priv_attaches: list[tuple[str, str]] = [
+        (pt, ap_path)
+        for pt in sorted(priv_types)
+        for _ft, ap_path, _raw, _ct in attaches_by_type.get(pt, [])
+    ]
+
+    if priv_attaches:
+        wild_entries: list[tuple[str, str, str, object]] = []  # (type, kind, path, span)
+        for arule in policy.attach_rules:
+            for t in arule.types:
+                for ct, _ in policy.expand_subject(t, allow_default_rules=False):
+                    if ct in policy.types and ct not in priv_types:
+                        for ap in arule.paths:
+                            if "*" in ap.path or "..." in ap.path:
+                                wild_entries.append((ct, "allow_attach", ap.path, arule.span))
+        for lrule in policy.link_rules:
+            for t in lrule.types:
+                for ct, _ in policy.expand_subject(t, allow_default_rules=False):
+                    if ct in policy.types and ct not in priv_types:
+                        for lp in lrule.paths:
+                            if "*" in lp or "..." in lp:
+                                wild_entries.append((ct, "allow_link", lp, lrule.span))
+
+        seen_overlaps: set[tuple[str, str, str, str]] = set()
+        for low_t, kind, wild_p, span in wild_entries:
+            for priv_t, priv_p in priv_attaches:
+                if _wildcard_path_overlaps(wild_p, priv_p):
+                    key = (low_t, wild_p, priv_t, priv_p)
+                    if key in seen_overlaps:
+                        continue
+                    seen_overlaps.add(key)
+                    findings.append(
+                        Finding(
+                            rule_id="PATHSPACE_HIJACK_OVERLAP",
+                            severity=Severity.CRITICAL,
+                            message=(
+                                f"Lower-privilege type '{low_t}' wildcard {kind} '{wild_p}' overlaps "
+                                f"privileged type '{priv_t}' attached path '{priv_p}' — enables QNX pathspace hijacking"
+                            ),
+                            span=span,
+                            remediation=(
+                                f"Replace wildcard '{wild_p}' on '{low_t}' with an explicit, non-overlapping "
+                                f"mount path that cannot shadow '{priv_p}'."
+                            ),
+                            metadata={
+                                "low_priv_type": low_t,
+                                "rule_kind": kind,
+                                "wildcard_path": wild_p,
+                                "privileged_type": priv_t,
+                                "privileged_path": priv_p,
+                            },
+                        )
+                    )
 
     return findings
 

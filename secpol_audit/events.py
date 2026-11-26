@@ -27,7 +27,7 @@ SECPOLEV_ALERT_PREFIX = "SECPOLEV_ALERT:"
 SECPOLEV_STATS_RE = re.compile(
     r"SECPOLEV_STATS:\s*ok=(\d+)\s+denied=(\d+)\s+dropped=(\d+)\b"
 )
-SENTRY_READ_AUTH_RE = re.compile(r"\bSENTRY_READ_AUTH=(OK|DENIED)\b")
+SENTRY_READ_AUTH_RE = re.compile(r"\b(SENTRY_(?:READ|CLIENT\d+)_AUTH)=(OK|DENIED)\b")
 SENTRY_READ_UNAUTH_RE = re.compile(r"\bSENTRY_READ_UNAUTH=(OK|DENIED)\b")
 
 VALID_VERDICTS = frozenset({"OK", "DENIED"})
@@ -121,6 +121,7 @@ class ParsedEventLog:
     stats: SecpolStats | None = None
     sentry_read_auth: str | None = None
     sentry_read_unauth: str | None = None
+    sentry_client_reads: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -177,7 +178,8 @@ def parse_events_text(text: str, source_path: str = "<memory>") -> ParsedEventLo
 
         m_auth = SENTRY_READ_AUTH_RE.search(line)
         if m_auth:
-            parsed.sentry_read_auth = m_auth.group(1)
+            parsed.sentry_client_reads[m_auth.group(1)] = m_auth.group(2)
+            parsed.sentry_read_auth = m_auth.group(2)
 
         m_unauth = SENTRY_READ_UNAUTH_RE.search(line)
         if m_unauth:

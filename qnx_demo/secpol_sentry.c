@@ -43,10 +43,18 @@
 
 #define RING_CAPACITY       64
 #define EVENT_BUF_SIZE      2048
+#define SENTRY_SNAP_MAX     8192
 #define MAX_CHAIN_LEN       16
 #define MAX_TYPE_NAME       64
 #define MAX_TRACKED_TYPES   32
 #define PULSE_CODE_SHUTDOWN (_PULSE_CODE_MINAVAIL + 1)
+
+typedef struct sentry_ocb {
+    iofunc_ocb_t hdr;
+    uint64_t     client_id;
+    char        *snapshot;
+    size_t       snap_len;
+} sentry_ocb_t;
 
 typedef struct {
     char type_name[MAX_TYPE_NAME];
@@ -61,12 +69,13 @@ typedef struct {
     uint64_t total_denied;
     uint64_t total_alerts;
     uint64_t ring_written;
+    uint64_t next_client_id;
     char ring[RING_CAPACITY][EVENT_BUF_SIZE];
 
     type_stat_t type_stats[MAX_TRACKED_TYPES];
     size_t num_type_stats;
 
-    /* Stateful multi-hop detector state */
+    /* Stateful multi-hop detector state (non-root settypeid transitions only) */
     char hop_chain[MAX_CHAIN_LEN][MAX_TYPE_NAME];
     size_t hop_chain_len;
     size_t settypeid_hops;
@@ -168,19 +177,6 @@ static void handle_signal(int signo) {
     g_stop = 1;
 }
 
-static bool is_privileged_ability_name(const char *ability) {
-    if (ability == NULL) {
-        return false;
-    }
-    return strcmp(ability, "mem_phys") == 0 ||
-           strcmp(ability, "io") == 0 ||
-           strcmp(ability, "prot_exec") == 0 ||
-           strcmp(ability, "mac_policy") == 0 ||
-           strcmp(ability, "setuid") == 0 ||
-           strcmp(ability, "channel_connect") == 0 ||
-           strcmp(ability, "gain_priv") == 0;
-}
-
 static void update_type_stats_locked(const char *type_name, bool denied, bool is_settypeid) {
     if (type_name == NULL || type_name[0] == '\0') {
         return;
@@ -260,6 +256,7 @@ static void record_event_and_detect_chain(
     const char *json_obj,
     uint64_t ts_ns,
     bool denied,
+    bool is_root,
     const char *type_name,
     const char *kind,
     const char *ability_name
@@ -267,8 +264,6 @@ static void record_event_and_detect_chain(
     bool is_settypeid = (strcmp(kind, "ability") == 0 &&
                          ability_name != NULL &&
                          strcmp(ability_name, "settypeid") == 0);
-    bool is_priv_action = (strcmp(kind, "ability") == 0 &&
-                           is_privileged_ability_name(ability_name));
 
     pthread_mutex_lock(&g_state.lock);
 
@@ -284,28 +279,20 @@ static void record_event_and_detect_chain(
     g_state.ring_written++;
 
     /* Stateful multi-hop detector:
-     * Track sequential successful `settypeid` transitions across distinct types,
-     * and correlate subsequent privileged ability/channel events in the same session.
+     * Only track actual OK non-root (`root == false`) `settypeid` transitions
+     * with a valid concrete type (`type != "-"` and `type != ""`), never root
+     * `on -T` bootstrap launches or ordinary ability checks. Emit
+     * SECPOLEV_ALERT only when a >=2-hop non-root settypeid chain occurs.
      */
-    if (!denied && type_name != NULL && type_name[0] != '\0') {
-        if (is_settypeid) {
-            if (!type_in_chain_locked(type_name) && g_state.hop_chain_len < MAX_CHAIN_LEN) {
-                snprintf(g_state.hop_chain[g_state.hop_chain_len],
-                         sizeof(g_state.hop_chain[0]), "%s", type_name);
-                g_state.hop_chain_len++;
-                g_state.settypeid_hops++;
-                if (g_state.settypeid_hops >= 2) {
-                    emit_multihop_alert_locked(ts_ns);
-                }
-            }
-        } else if (is_priv_action && g_state.settypeid_hops >= 1) {
-            if (!type_in_chain_locked(type_name) && g_state.hop_chain_len < MAX_CHAIN_LEN) {
-                snprintf(g_state.hop_chain[g_state.hop_chain_len],
-                         sizeof(g_state.hop_chain[0]), "%s", type_name);
-                g_state.hop_chain_len++;
-                if (g_state.hop_chain_len >= 2) {
-                    emit_multihop_alert_locked(ts_ns);
-                }
+    if (!denied && !is_root && is_settypeid &&
+        type_name != NULL && type_name[0] != '\0' && strcmp(type_name, "-") != 0) {
+        if (!type_in_chain_locked(type_name) && g_state.hop_chain_len < MAX_CHAIN_LEN) {
+            snprintf(g_state.hop_chain[g_state.hop_chain_len],
+                     sizeof(g_state.hop_chain[0]), "%s", type_name);
+            g_state.hop_chain_len++;
+            g_state.settypeid_hops++;
+            if (g_state.settypeid_hops >= 2) {
+                emit_multihop_alert_locked(ts_ns);
             }
         }
     }
@@ -462,7 +449,7 @@ static void *secpolev_collector_thread(void *arg) {
         fprintf(stdout, "SECPOLEV_JSON:%s\n", json_obj);
         fflush(stdout);
 
-        record_event_and_detect_chain(json_obj, ts_ns, denied, type_raw, kind, ability_raw);
+        record_event_and_detect_chain(json_obj, ts_ns, denied, is_root, type_raw, kind, ability_raw);
     }
 
     request_secpolev_shutdown();
@@ -487,7 +474,7 @@ static int pulse_shutdown_handler(message_context_t *ctp, int code, unsigned fla
     return 0;
 }
 
-static size_t build_sentry_summary_json(char *buf, size_t buf_size) {
+static size_t build_sentry_summary_json(char *buf, size_t buf_size, uint64_t client_id) {
     size_t pos = 0;
     pthread_mutex_lock(&g_state.lock);
 
@@ -496,8 +483,9 @@ static size_t build_sentry_summary_json(char *buf, size_t buf_size) {
                                      : 0ULL;
     int n = snprintf(
         buf + pos, buf_size - pos,
-        "{\"ok\":%" PRIu64 ",\"denied\":%" PRIu64 ",\"alerts\":%" PRIu64
-        ",\"dropped\":%llu,\"recent_events\":[",
+        "{\"client_id\":%" PRIu64 ",\"ok\":%" PRIu64 ",\"denied\":%" PRIu64
+        ",\"alerts\":%" PRIu64 ",\"dropped\":%llu,\"recent_events\":[",
+        client_id,
         g_state.total_ok,
         g_state.total_denied,
         g_state.total_alerts,
@@ -541,8 +529,52 @@ static size_t build_sentry_summary_json(char *buf, size_t buf_size) {
     return pos;
 }
 
+/* Per-open OCB allocator: freezes an independent telemetry snapshot per client open()
+ * so 2+ concurrent authorized clients stream with isolated offsets (solving QNX 8.0's
+ * single-consumer libsecpolev restriction).
+ */
+static iofunc_ocb_t *sentry_ocb_calloc(resmgr_context_t *ctp, iofunc_attr_t *attr) {
+    (void)ctp;
+    (void)attr;
+    sentry_ocb_t *socb = (sentry_ocb_t *)calloc(1, sizeof(sentry_ocb_t));
+    if (socb == NULL) {
+        return NULL;
+    }
+
+    pthread_mutex_lock(&g_state.lock);
+    socb->client_id = ++g_state.next_client_id;
+    pthread_mutex_unlock(&g_state.lock);
+
+    socb->snapshot = (char *)malloc(SENTRY_SNAP_MAX);
+    if (socb->snapshot != NULL) {
+        socb->snap_len = build_sentry_summary_json(
+            socb->snapshot, SENTRY_SNAP_MAX, socb->client_id);
+    }
+    return &socb->hdr;
+}
+
+static void sentry_ocb_free(iofunc_ocb_t *ocb) {
+    sentry_ocb_t *socb = (sentry_ocb_t *)ocb;
+    if (socb != NULL) {
+        free(socb->snapshot);
+        socb->snapshot = NULL;
+        free(socb);
+    }
+}
+
+static iofunc_funcs_t g_ocb_funcs = {
+    .nfuncs     = _IOFUNC_NFUNCS,
+    .ocb_calloc = sentry_ocb_calloc,
+    .ocb_free   = sentry_ocb_free
+};
+
+static iofunc_mount_t g_mount = {
+    .funcs = &g_ocb_funcs
+};
+
 static int sentry_io_read(resmgr_context_t *ctp, io_read_t *msg, RESMGR_OCB_T *ctp_ocb) {
     iofunc_ocb_t *ocb = (iofunc_ocb_t *)ctp_ocb;
+    sentry_ocb_t *socb = (sentry_ocb_t *)ocb;
     int status;
     int nonblock = 0;
 
@@ -562,26 +594,29 @@ static int sentry_io_read(resmgr_context_t *ctp, io_read_t *msg, RESMGR_OCB_T *c
         return EACCES;
     }
 
-    char payload[8192];
-    size_t total_len = build_sentry_summary_json(payload, sizeof(payload));
+    if (socb->snapshot == NULL) {
+        return ENOMEM;
+    }
 
-    if (ocb->offset >= (off_t)total_len) {
+    if (ocb->offset >= (off_t)socb->snap_len) {
         _IO_SET_READ_NBYTES(ctp, 0);
         return _RESMGR_NPARTS(0);
     }
 
-    size_t remaining = total_len - (size_t)ocb->offset;
+    size_t remaining = socb->snap_len - (size_t)ocb->offset;
     size_t req_bytes = (size_t)msg->i.nbytes;
     size_t nbytes = (req_bytes < remaining) ? req_bytes : remaining;
 
-    if (MsgReply(ctp->rcvid, (int)nbytes, payload + ocb->offset, nbytes) == -1) {
+    if (MsgReply(ctp->rcvid, (int)nbytes, socb->snapshot + ocb->offset, nbytes) == -1) {
         return errno;
     }
     ocb->offset += (off_t)nbytes;
     return _RESMGR_NOREPLY;
 }
 
-/* Built-in probe mode (`-r <label>`) so IFS scripts can verify custom-class access without ksh/cat */
+/* Built-in probe mode (`-r <label>`) performing chunked reads over an independent OCB
+ * so concurrent clients overlap in time and verify isolated per-client cursors.
+ */
 static int run_read_probe(const char *label) {
     int fd = open(SENTRY_DEV_PATH, O_RDONLY);
     if (fd == -1) {
@@ -590,14 +625,26 @@ static int run_read_probe(const char *label) {
         return EXIT_SUCCESS;
     }
     char buf[512];
-    ssize_t n = read(fd, buf, sizeof(buf) - 1);
-    int saved_errno = errno;
-    close(fd);
-    if (n > 0) {
-        printf("%s=OK bytes=%zd\n", label, n);
-    } else {
+    ssize_t first = read(fd, buf, 64);
+    if (first <= 0) {
+        int saved_errno = errno;
+        close(fd);
         printf("%s=DENIED errno=%d\n", label, saved_errno);
+        fflush(stdout);
+        return EXIT_SUCCESS;
     }
+    /* Brief overlap window so concurrent clients hold live independent OCBs */
+    usleep(50000);
+    ssize_t total = first;
+    while (total < (ssize_t)(sizeof(buf) - 1)) {
+        ssize_t n = read(fd, buf + total, (size_t)((ssize_t)(sizeof(buf) - 1) - total));
+        if (n <= 0) {
+            break;
+        }
+        total += n;
+    }
+    close(fd);
+    printf("%s=OK bytes=%zd\n", label, total);
     fflush(stdout);
     return EXIT_SUCCESS;
 }
@@ -661,6 +708,7 @@ int main(int argc, char *argv[]) {
 
     iofunc_attr_t io_attr;
     iofunc_attr_init(&io_attr, S_IFCHR | 0444, NULL, NULL);
+    io_attr.mount = &g_mount;
 
     int resmgr_id = secpol_resmgr_attach(
         NULL,

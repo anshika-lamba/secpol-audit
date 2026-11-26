@@ -23,7 +23,8 @@
 
     on -T ivi_ui_t -u 31:31 /proc/boot/ivi_exploit
 
-    on -T audit_reader_t -u 26:26 /proc/boot/secpol_sentry -r SENTRY_READ_AUTH
+    on -T audit_reader_t -u 26:26 /proc/boot/secpol_sentry -r SENTRY_CLIENT1_AUTH &
+    on -T audit_reader_t -u 26:26 /proc/boot/secpol_sentry -r SENTRY_CLIENT2_AUTH
     on -T ivi_ui_t -u 31:31 /proc/boot/secpol_sentry -r SENTRY_READ_UNAUTH
 
     waitfor /dev/secpol_sentry_done 8

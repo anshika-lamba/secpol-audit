@@ -19,6 +19,7 @@ from secpol_audit.ir import Finding, ParseDiagnostic
 from secpol_audit.parser_ifs import parse_ifs_file
 from secpol_audit.parser_secpol import parse_secpol_file
 from secpol_audit.paths import analyze_paths
+from secpol_audit.prune import prune_policy_files
 from secpol_audit.remediate import remediate_policy_text
 from secpol_audit.runtime import parse_pidin_file, verify_runtime
 from secpol_audit.sarif import findings_to_sarif_json
@@ -449,6 +450,18 @@ def build_parser() -> argparse.ArgumentParser:
     p_fw.add_argument("--output", "-o", help="Write output to file instead of stdout")
     p_fw.set_defaults(func=_cmd_audit_firmware)
 
+    # prune
+    p_prune = sub.add_parser(
+        "prune",
+        help="Flag unused privileged rules and unregistered sigevents from QNX secpolgenerate captures",
+    )
+    p_prune.add_argument("secpol", help="Path to QNX 8.0 .secpol policy file")
+    p_prune.add_argument("--unused", required=True, help="Path to captured /dev/secpolgenerate/unused output")
+    p_prune.add_argument("--errors", help="Optional path to captured /dev/secpolgenerate/errors output")
+    p_prune.add_argument("--format", choices=("text", "json"), default="text", help="Output format")
+    p_prune.add_argument("--output", "-o", help="Write output to file instead of stdout")
+    p_prune.set_defaults(func=_cmd_prune)
+
     return parser
 
 
@@ -556,6 +569,38 @@ def _cmd_audit_firmware(args: argparse.Namespace) -> int:
             f"secpol-audit audit-firmware: {policy_path} + {ifs_path} + {bin_dir}\n"
             f"ELF64 binaries scanned: {len(res.binaries_scanned)} | "
             f"Unresolved IFS services: {len(res.missing_binaries)}"
+        )
+        _write_output(_format_findings_text(res.findings, header=header), args.output)
+
+    return 1 if res.findings else 0
+
+
+def _cmd_prune(args: argparse.Namespace) -> int:
+    policy_path = Path(args.secpol)
+    unused_path = Path(args.unused)
+    if not policy_path.is_file():
+        sys.stderr.write(f"ERROR: policy file not found: {policy_path}\n")
+        return 2
+    if not unused_path.is_file():
+        sys.stderr.write(f"ERROR: unused file not found: {unused_path}\n")
+        return 2
+    if args.errors and not Path(args.errors).is_file():
+        sys.stderr.write(f"ERROR: errors file not found: {args.errors}\n")
+        return 2
+
+    policy = parse_secpol_file(policy_path)
+    res = prune_policy_files(policy, unused_path, errors_file=args.errors)
+
+    if args.format == "json":
+        _write_output(json.dumps(res.to_dict(), indent=2), args.output)
+    else:
+        header = (
+            f"secpol-audit prune: {policy_path} + {unused_path}"
+            + (f" + {args.errors}" if args.errors else "")
+            + "\n"
+            + f"Unused privileged rules: {len(res.unused_privileged_rules)} | "
+            + f"Unregistered sigevents: {len(res.unregistered_sigevents)} | "
+            + f"Other errors: {len(res.other_errors)}"
         )
         _write_output(_format_findings_text(res.findings, header=header), args.output)
 

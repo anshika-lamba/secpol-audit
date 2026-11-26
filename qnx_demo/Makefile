@@ -14,7 +14,7 @@ SENTRY_BINS   := $(BINARIES) $(BUILD_DIR)/secpol_sentry
 MUTANTS       := M0_clean M1_no_connect M2_untyped_server M3_2hop_escalate M3_fixed
 SENTRY_MUTANTS := M0_sentry_clean M3_sentry_escalate
 
-.PHONY: all binaries images sentry-binaries sentry-images clean check-sdp
+.PHONY: all binaries images sentry-binaries sentry-images secpolgen-image clean check-sdp
 
 all: binaries images
 
@@ -103,6 +103,11 @@ $(BUILD_DIR)/M3_sentry_escalate.ifs: build_sentry.ifs.in $(BUILD_DIR)/M3_sentry_
 images: check-sdp $(addprefix $(BUILD_DIR)/,$(addsuffix .ifs,$(MUTANTS)))
 
 sentry-images: check-sdp $(addprefix $(BUILD_DIR)/,$(addsuffix .ifs,$(SENTRY_MUTANTS)))
+
+$(BUILD_DIR)/secpolgen_capture.ifs: secpolgen_capture.ifs $(BUILD_DIR)/can_server
+	$(MKIFS) $< $@
+
+secpolgen-image: check-sdp $(BUILD_DIR)/secpolgen_capture.ifs
 
 clean:
 	rm -rf $(BUILD_DIR)
