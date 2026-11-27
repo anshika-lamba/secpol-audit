@@ -81,14 +81,14 @@ jobs:
             test -s "$f" || { echo "Missing or empty artifact: $f"; exit 1; }
           done
           python3 -c '
-import json, sys
-for p in ("qnx_demo/build/blast/M0_blast_completeness.json", "qnx_demo/build/blast/M3_blast_completeness.json"):
-    d = json.load(open(p))
-    assert d["result"] == "COMPLETE", f"{p}: result={d[\"result\"]}"
-    assert d["mismatches"] == 0, f"{p}: mismatches={d[\"mismatches\"]}"
-    assert d["dropped_events"] == 0, f"{p}: dropped_events={d[\"dropped_events\"]}"
-print("All blast completeness checks PASSED")
-'
+          import json
+          for p in ("qnx_demo/build/blast/M0_blast_completeness.json", "qnx_demo/build/blast/M3_blast_completeness.json"):
+              d = json.load(open(p))
+              assert d["result"] == "COMPLETE", f"{p}: result={d[\"result\"]}"
+              assert d["mismatches"] == 0, f"{p}: mismatches={d[\"mismatches\"]}"
+              assert d["dropped_events"] == 0, f"{p}: dropped_events={d[\"dropped_events\"]}"
+          print("All blast completeness checks PASSED")
+          '
 
       - name: Build secpolgen_capture.ifs and boot stock QNX 8.0 secpolgenerate capture
         shell: bash
