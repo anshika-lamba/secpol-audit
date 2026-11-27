@@ -110,13 +110,19 @@ $(BUILD_DIR)/M3_sentry_escalate.ifs: build_sentry.ifs.in $(BUILD_DIR)/M3_sentry_
 	    -e 's|@MUTANT_NAME@|M3_sentry_escalate|g' $< > $(BUILD_DIR)/M3_sentry_escalate.build
 	$(MKIFS) $(BUILD_DIR)/M3_sentry_escalate.build $@
 
-$(BUILD_DIR)/M0_blast_clean.ifs: build_blast.ifs.in $(BUILD_DIR)/M0_sentry_clean.secpol.bin $(BLAST_BINS)
-	sed -e 's|@SECPOL_BIN@|$(BUILD_DIR)/M0_sentry_clean.secpol.bin|g' \
+$(BUILD_DIR)/M0_blast_clean.secpol.bin: mutants/M0_blast_clean.secpol | $(BUILD_DIR)
+	$(SECPOLCOMPILE) -o $@ $<
+
+$(BUILD_DIR)/M3_blast_escalate.secpol.bin: mutants/M3_blast_escalate.secpol | $(BUILD_DIR)
+	$(SECPOLCOMPILE) -o $@ $<
+
+$(BUILD_DIR)/M0_blast_clean.ifs: build_blast.ifs.in $(BUILD_DIR)/M0_blast_clean.secpol.bin $(BLAST_BINS)
+	sed -e 's|@SECPOL_BIN@|$(BUILD_DIR)/M0_blast_clean.secpol.bin|g' \
 	    -e 's|@MUTANT_NAME@|M0_blast_clean|g' $< > $(BUILD_DIR)/M0_blast_clean.build
 	$(MKIFS) $(BUILD_DIR)/M0_blast_clean.build $@
 
-$(BUILD_DIR)/M3_blast_escalate.ifs: build_blast.ifs.in $(BUILD_DIR)/M3_sentry_escalate.secpol.bin $(BLAST_BINS)
-	sed -e 's|@SECPOL_BIN@|$(BUILD_DIR)/M3_sentry_escalate.secpol.bin|g' \
+$(BUILD_DIR)/M3_blast_escalate.ifs: build_blast.ifs.in $(BUILD_DIR)/M3_blast_escalate.secpol.bin $(BLAST_BINS)
+	sed -e 's|@SECPOL_BIN@|$(BUILD_DIR)/M3_blast_escalate.secpol.bin|g' \
 	    -e 's|@MUTANT_NAME@|M3_blast_escalate|g' $< > $(BUILD_DIR)/M3_blast_escalate.build
 	$(MKIFS) $(BUILD_DIR)/M3_blast_escalate.build $@
 

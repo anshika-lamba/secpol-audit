@@ -74,12 +74,6 @@ typedef struct {
 
     type_stat_t type_stats[MAX_TRACKED_TYPES];
     size_t num_type_stats;
-
-    /* Stateful multi-hop detector state (non-root settypeid transitions only) */
-    char hop_chain[MAX_CHAIN_LEN][MAX_TYPE_NAME];
-    size_t hop_chain_len;
-    size_t settypeid_hops;
-    bool alert_emitted_for_len[MAX_CHAIN_LEN + 1];
 } sentry_state_t;
 
 static sentry_state_t g_state;
@@ -203,60 +197,9 @@ static void update_type_stats_locked(const char *type_name, bool denied, bool is
     }
 }
 
-static bool type_in_chain_locked(const char *type_name) {
-    for (size_t i = 0; i < g_state.hop_chain_len; ++i) {
-        if (strcmp(g_state.hop_chain[i], type_name) == 0) {
-            return true;
-        }
-    }
-    return false;
-}
-
-static void emit_multihop_alert_locked(uint64_t ts_ns) {
-    if (g_state.hop_chain_len < 2 || g_state.hop_chain_len > MAX_CHAIN_LEN) {
-        return;
-    }
-    if (g_state.alert_emitted_for_len[g_state.hop_chain_len]) {
-        return;
-    }
-    g_state.alert_emitted_for_len[g_state.hop_chain_len] = true;
-    g_state.total_alerts++;
-
-    char alert_buf[EVENT_BUF_SIZE];
-    size_t pos = 0;
-    int n = snprintf(alert_buf, sizeof(alert_buf),
-                     "SECPOLEV_ALERT:{\"kind\":\"multi_hop_chain\",\"chain\":[");
-    if (n > 0 && (size_t)n < sizeof(alert_buf)) {
-        pos = (size_t)n;
-    }
-    for (size_t i = 0; i < g_state.hop_chain_len; ++i) {
-        char esc[MAX_TYPE_NAME * 2];
-        json_escape(g_state.hop_chain[i], esc, sizeof(esc));
-        size_t esc_len = strlen(esc);
-        size_t need = (i > 0 ? 1U : 0U) + 2U + esc_len;
-        if (pos + need + 40U >= sizeof(alert_buf)) {
-            break;
-        }
-        if (i > 0) {
-            alert_buf[pos++] = ',';
-        }
-        alert_buf[pos++] = '"';
-        memcpy(alert_buf + pos, esc, esc_len);
-        pos += esc_len;
-        alert_buf[pos++] = '"';
-        alert_buf[pos] = '\0';
-    }
-    (void)snprintf(alert_buf + pos, sizeof(alert_buf) - pos,
-                   "],\"ts_ns\":%" PRIu64 "}", ts_ns);
-    fprintf(stdout, "%s\n", alert_buf);
-    fflush(stdout);
-}
-
-static void record_event_and_detect_chain(
+static void record_event(
     const char *json_obj,
-    uint64_t ts_ns,
     bool denied,
-    bool is_root,
     const char *type_name,
     const char *kind,
     const char *ability_name
@@ -277,25 +220,6 @@ static void record_event_and_detect_chain(
     size_t slot = (size_t)(g_state.ring_written % RING_CAPACITY);
     snprintf(g_state.ring[slot], sizeof(g_state.ring[slot]), "%s", json_obj);
     g_state.ring_written++;
-
-    /* Stateful multi-hop detector:
-     * Only track actual OK non-root (`root == false`) `settypeid` transitions
-     * with a valid concrete type (`type != "-"` and `type != ""`), never root
-     * `on -T` bootstrap launches or ordinary ability checks. Emit
-     * SECPOLEV_ALERT only when a >=2-hop non-root settypeid chain occurs.
-     */
-    if (!denied && !is_root && is_settypeid &&
-        type_name != NULL && type_name[0] != '\0' && strcmp(type_name, "-") != 0) {
-        if (!type_in_chain_locked(type_name) && g_state.hop_chain_len < MAX_CHAIN_LEN) {
-            snprintf(g_state.hop_chain[g_state.hop_chain_len],
-                     sizeof(g_state.hop_chain[0]), "%s", type_name);
-            g_state.hop_chain_len++;
-            g_state.settypeid_hops++;
-            if (g_state.settypeid_hops >= 2) {
-                emit_multihop_alert_locked(ts_ns);
-            }
-        }
-    }
 
     pthread_mutex_unlock(&g_state.lock);
 }
@@ -333,6 +257,7 @@ static void *secpolev_collector_thread(void *arg) {
         const char *verdict = denied ? "DENIED" : "OK";
         const char *proc_raw = secpolev_get_process_name();
         const char *type_raw = secpolev_get_process_type();
+        int ev_pid = (int)secpolev_get_pid();
         uint64_t cycles = secpolev_get_timestamp();
         uint64_t ts_ns = 0;
         if (clock_cycles_to_time_ns(cycles, CLOCK_MONOTONIC, &ts_ns) != 0) {
@@ -419,6 +344,7 @@ static void *secpolev_collector_thread(void *arg) {
             json_obj,
             sizeof(json_obj),
             "{\"ts_ns\":%" PRIu64
+            ",\"pid\":%d"
             ",\"verdict\":\"%s\""
             ",\"proc\":\"%s\""
             ",\"type\":\"%s\""
@@ -432,6 +358,7 @@ static void *secpolev_collector_thread(void *arg) {
             ",\"perm\":\"%s\""
             ",\"obj_type\":\"%s\"}",
             ts_ns,
+            ev_pid,
             verdict,
             proc_esc,
             type_esc,
@@ -449,7 +376,7 @@ static void *secpolev_collector_thread(void *arg) {
         fprintf(stdout, "SECPOLEV_JSON:%s\n", json_obj);
         fflush(stdout);
 
-        record_event_and_detect_chain(json_obj, ts_ns, denied, is_root, type_raw, kind, ability_raw);
+        record_event(json_obj, denied, type_raw, kind, ability_raw);
     }
 
     request_secpolev_shutdown();

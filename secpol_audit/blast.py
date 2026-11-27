@@ -44,6 +44,33 @@ STATE_SYSCALL_ONLY_UNOBSERVABLE = "SYSCALL_ONLY_UNOBSERVABLE"
 STATE_STATIC_ONLY = "STATIC_ONLY"
 
 
+def classify_allow_attach_errno(
+    ret: int | None,
+    err_num: int,
+    outcome: str = "DENY",
+) -> tuple[str, str | None]:
+    """Strict 5-way classification for `allow_attach` kprobe results.
+
+    Returns `(classification, reason)`:
+      - `ret >= 0` (`errno == 0`) -> `("ALLOW", None)`
+      - `errno == 13` (`EACCES`) -> `("DENY_POLICY", None)`
+      - `errno == 1` (`EPERM`)   -> `("DENY_ABILITY", None)`
+      - `errno == 17` (`EEXIST`) -> `("INCONCLUSIVE", "PATH_COLLISION")`
+      - any other non-zero errno -> `("SETUP_FAILURE", "INCONCLUSIVE")`
+    """
+    if (ret is not None and ret >= 0 and err_num == 0) or (
+        ret is None and outcome == "ALLOW" and err_num == 0
+    ):
+        return "ALLOW", None
+    if err_num == 13:
+        return "DENY_POLICY", None
+    if err_num == 1:
+        return "DENY_ABILITY", None
+    if err_num == 17:
+        return "INCONCLUSIVE", "PATH_COLLISION"
+    return "SETUP_FAILURE", "INCONCLUSIVE"
+
+
 @dataclass(frozen=True)
 class KprobeRecord:
     """Single parsed `KPROBE_JSON:` on-target syscall probe result."""
@@ -55,9 +82,14 @@ class KprobeRecord:
     errno: int
     line: int
     raw: str
+    path: str | None = None
+    ret: int | None = None
+    errno_name: str | None = None
+    classification: str | None = None
+    classification_reason: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        d: dict[str, Any] = {
             "origin": self.origin,
             "op": self.op,
             "target": self.target,
@@ -66,6 +98,17 @@ class KprobeRecord:
             "line": self.line,
             "raw": self.raw,
         }
+        if self.path is not None:
+            d["path"] = self.path
+        if self.ret is not None:
+            d["ret"] = self.ret
+        if self.errno_name is not None:
+            d["errno_name"] = self.errno_name
+        if self.classification is not None:
+            d["classification"] = self.classification
+        if self.classification_reason is not None:
+            d["classification_reason"] = self.classification_reason
+        return d
 
 
 @dataclass(frozen=True)
@@ -262,9 +305,16 @@ def parse_blast_log_text(
                 )
             origin = obj.get("origin")
             op = obj.get("op")
+            path_val = obj.get("path")
             target = obj.get("target")
-            outcome = obj.get("outcome")
+            if (not isinstance(target, str) or not target) and isinstance(path_val, str) and path_val:
+                target = path_val
+            ret_val = obj.get("ret")
             err_num = obj.get("errno", 0)
+            err_name = obj.get("errno_name")
+            outcome = obj.get("outcome")
+            if outcome is None and ret_val is not None:
+                outcome = "ALLOW" if (isinstance(ret_val, int) and not isinstance(ret_val, bool) and ret_val >= 0 and err_num == 0) else "DENY"
             if not isinstance(origin, str) or not origin:
                 raise ParseDiagnostic("PARSE_ERROR", "KPROBE_JSON requires non-empty string 'origin'", span)
             if op not in VALID_KPROBE_OPS:
@@ -283,6 +333,14 @@ def parse_blast_log_text(
                 )
             if not isinstance(err_num, int) or isinstance(err_num, bool) or err_num < 0:
                 raise ParseDiagnostic("PARSE_ERROR", f"Invalid KPROBE_JSON errno '{err_num}'", span)
+            classification: str | None = None
+            classification_reason: str | None = None
+            if op == "allow_attach":
+                classification, classification_reason = classify_allow_attach_errno(
+                    ret_val if isinstance(ret_val, int) and not isinstance(ret_val, bool) else None,
+                    err_num,
+                    outcome,
+                )
             kprobes.append(
                 KprobeRecord(
                     origin=origin,
@@ -292,6 +350,11 @@ def parse_blast_log_text(
                     errno=err_num,
                     line=line_no,
                     raw=line,
+                    path=path_val if isinstance(path_val, str) and path_val else None,
+                    ret=ret_val if isinstance(ret_val, int) and not isinstance(ret_val, bool) else None,
+                    errno_name=err_name if isinstance(err_name, str) and err_name else None,
+                    classification=classification,
+                    classification_reason=classification_reason,
                 )
             )
 
@@ -667,12 +730,16 @@ def analyze_blast(
     correlated_count = 0
     unobservable_count = 0
     mismatch_count = 0
+    inconclusive_count = 0
     for kp in scoped_kprobes:
-        static_pred, _ = _static_prediction_for_op(
-            policy, path_res, attaches_by_type, kp.origin, kp.op, kp.target
-        )
-        if static_pred != kp.outcome:
-            mismatch_count += 1
+        if kp.op == "allow_attach" and kp.classification in ("INCONCLUSIVE", "SETUP_FAILURE"):
+            inconclusive_count += 1
+        else:
+            static_pred, _ = _static_prediction_for_op(
+                policy, path_res, attaches_by_type, kp.origin, kp.op, kp.target
+            )
+            if static_pred != kp.outcome:
+                mismatch_count += 1
         witness = _find_kernel_witness(secpolev_events, kp.origin, kp.op, kp.target, kp.outcome)
         if witness is not None:
             correlated_count += 1
@@ -686,6 +753,7 @@ def analyze_blast(
         and probes_total > 0
         and probes_completed == probes_total
         and dropped_events == 0
+        and inconclusive_count == 0
     ):
         comp_result = "COMPLETE"
     else:
