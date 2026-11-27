@@ -9,6 +9,12 @@ import sys
 from typing import Sequence
 
 from secpol_audit import __version__
+from secpol_audit.blast import (
+    BlastReport,
+    analyze_blast,
+    diff_blast_reports,
+)
+from secpol_audit.blast_html import render_blast_html
 from secpol_audit.checks import run_all_checks
 from secpol_audit.compile_wrap import CompileResult, run_secpolcompile
 from secpol_audit.diff import PolicyDiffResult, diff_policies
@@ -462,6 +468,34 @@ def build_parser() -> argparse.ArgumentParser:
     p_prune.add_argument("--output", "-o", help="Write output to file instead of stdout")
     p_prune.set_defaults(func=_cmd_prune)
 
+    # blast
+    p_blast = sub.add_parser(
+        "blast",
+        help="Evidence-aware concentric blast-radius analysis joining static policy, kprobe syscalls, and libsecpolev",
+    )
+    p_blast.add_argument("secpol", help="Path to QNX 8.0 .secpol policy file")
+    p_blast.add_argument("--origin", help="Compromised origin security type to focus on")
+    p_blast.add_argument("--log", help="Optional path to QEMU serial log containing KPROBE_JSON / SECPOLEV_JSON")
+    p_blast.add_argument("--ifs", help="Optional path to matching QNX 8.0 build.ifs file")
+    p_blast.add_argument("--format", choices=("text", "json"), default="text", help="Output format")
+    p_blast.add_argument("--html", help="Write single-file offline Concentric Blast-Radius Explorer HTML")
+    p_blast.add_argument("--completeness-out", help="Write Evidence Completeness JSON summary to file")
+    p_blast.add_argument("--after-policy", help="Optional remediated .secpol policy for Before vs. After HTML toggle")
+    p_blast.add_argument("--after-log", help="Optional QEMU serial log for the --after-policy verification boot")
+    p_blast.add_argument("--output", "-o", help="Write output to file instead of stdout")
+    p_blast.set_defaults(func=_cmd_blast)
+
+    # blast-diff
+    p_bdiff = sub.add_parser(
+        "blast-diff",
+        help="Compare two `secpol-audit blast --format json` reports (before vs. after remediation)",
+    )
+    p_bdiff.add_argument("before", help="Path to baseline blast JSON report")
+    p_bdiff.add_argument("after", help="Path to updated blast JSON report")
+    p_bdiff.add_argument("--format", choices=("text", "json"), default="text", help="Output format")
+    p_bdiff.add_argument("--output", "-o", help="Write output to file instead of stdout")
+    p_bdiff.set_defaults(func=_cmd_blast_diff)
+
     return parser
 
 
@@ -605,6 +639,185 @@ def _cmd_prune(args: argparse.Namespace) -> int:
         _write_output(_format_findings_text(res.findings, header=header), args.output)
 
     return 1 if res.findings else 0
+
+
+def _format_blast_text(report: BlastReport) -> str:
+    comp = report.completeness
+    view = report.origins.get(report.selected_origin)
+    lines: list[str] = [
+        f"secpol-audit blast: {report.policy_path}"
+        + (f" (log: {report.log_path})" if report.log_path else " (static-only)"),
+        f"Policy SHA-256: {comp.policy_hash[:12]} | Origin: {report.selected_origin or '-'}",
+        f"Evidence Completeness: {comp.result} "
+        f"(probes={comp.probes_completed}/{comp.probes_total}, "
+        f"correlated={comp.kernel_events_correlated}, "
+        f"unobservable={comp.unobservable_operations}, "
+        f"dropped={comp.dropped_events}, "
+        f"mismatches={comp.mismatches})",
+    ]
+    if view is not None:
+        reachable_count = len([n for n in view.nodes if n.ring > 0])
+        lines.append(
+            f"Reachable types from {view.origin}: {reachable_count} | "
+            f"Reachable privileged sinks: {len(view.reachable_sinks)}"
+            + (f" ({', '.join(view.reachable_sinks)})" if view.reachable_sinks else "")
+        )
+        if view.receipts:
+            lines.append(f"Evidence Receipts ({len(view.receipts)}):")
+            for r in view.receipts:
+                sys_str = (
+                    f"{r.syscall_outcome}(errno={r.syscall_errno})"
+                    if r.syscall_outcome
+                    else "not-probed"
+                )
+                kern_str = r.kernel_witness_verdict or "unobservable"
+                lines.append(
+                    f"  [{r.evidence_state}] {r.origin} --{r.op}--> {r.target} "
+                    f"(ring={r.ring}, static={r.static_prediction}, "
+                    f"syscall={sys_str}, kernel={kern_str})"
+                )
+    return "\n".join(lines) + "\n"
+
+
+def _cmd_blast(args: argparse.Namespace) -> int:
+    policy_path = Path(args.secpol)
+    if not policy_path.is_file():
+        sys.stderr.write(f"ERROR: policy file not found: {policy_path}\n")
+        return 2
+    ifs = None
+    if args.ifs:
+        ifs_path = Path(args.ifs)
+        if not ifs_path.is_file():
+            sys.stderr.write(f"ERROR: IFS file not found: {ifs_path}\n")
+            return 2
+        ifs = parse_ifs_file(ifs_path)
+    log_text: str | None = None
+    log_path_str: str | None = None
+    if args.log:
+        log_path = Path(args.log)
+        if not log_path.is_file():
+            sys.stderr.write(f"ERROR: log file not found: {log_path}\n")
+            return 2
+        log_text = log_path.read_text(encoding="utf-8", errors="replace")
+        log_path_str = str(log_path)
+
+    policy = parse_secpol_file(policy_path)
+    if args.origin and args.origin not in policy.types:
+        sys.stderr.write(
+            f"ERROR: origin type '{args.origin}' is not declared in {policy_path}\n"
+        )
+        return 2
+
+    report = analyze_blast(
+        policy,
+        policy_source_bytes=policy_path.read_bytes(),
+        ifs=ifs,
+        log_text=log_text,
+        log_path=log_path_str,
+        origin_filter=args.origin,
+    )
+
+    after_report: BlastReport | None = None
+    if args.after_policy:
+        after_path = Path(args.after_policy)
+        if not after_path.is_file():
+            sys.stderr.write(f"ERROR: --after-policy file not found: {after_path}\n")
+            return 2
+        after_log_text: str | None = None
+        after_log_path_str: str | None = None
+        if args.after_log:
+            after_log_path = Path(args.after_log)
+            if not after_log_path.is_file():
+                sys.stderr.write(f"ERROR: --after-log file not found: {after_log_path}\n")
+                return 2
+            after_log_text = after_log_path.read_text(encoding="utf-8", errors="replace")
+            after_log_path_str = str(after_log_path)
+        after_policy = parse_secpol_file(after_path)
+        after_report = analyze_blast(
+            after_policy,
+            policy_source_bytes=after_path.read_bytes(),
+            ifs=ifs,
+            log_text=after_log_text,
+            log_path=after_log_path_str,
+            origin_filter=(
+                args.origin if args.origin and args.origin in after_policy.types else None
+            ),
+        )
+
+    if args.completeness_out:
+        cpath = Path(args.completeness_out)
+        cpath.parent.mkdir(parents=True, exist_ok=True)
+        cpath.write_text(
+            json.dumps(report.completeness.to_dict(), indent=2) + "\n",
+            encoding="utf-8",
+        )
+
+    if args.html:
+        html_doc = render_blast_html(report, after_report=after_report)
+        hpath = Path(args.html)
+        hpath.parent.mkdir(parents=True, exist_ok=True)
+        hpath.write_text(html_doc, encoding="utf-8")
+
+    if args.format == "json":
+        _write_output(json.dumps(report.to_dict(), indent=2) + "\n", args.output)
+    else:
+        _write_output(_format_blast_text(report), args.output)
+
+    if report.completeness.result == "MISMATCH":
+        return 1
+    if args.origin:
+        view = report.origins.get(args.origin)
+        if view and view.reachable_sinks:
+            return 1
+        return 0
+    if any(v.reachable_sinks for v in report.origins.values()):
+        return 1
+    return 0
+
+
+def _cmd_blast_diff(args: argparse.Namespace) -> int:
+    before_path = Path(args.before)
+    after_path = Path(args.after)
+    for label, p in (("before", before_path), ("after", after_path)):
+        if not p.is_file():
+            sys.stderr.write(f"ERROR: {label} blast JSON not found: {p}\n")
+            return 2
+
+    try:
+        before_data = json.loads(before_path.read_text(encoding="utf-8"))
+        after_data = json.loads(after_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        sys.stderr.write(f"ERROR: invalid blast JSON: {exc}\n")
+        return 2
+
+    if not isinstance(before_data, dict) or not isinstance(after_data, dict):
+        sys.stderr.write("ERROR: blast JSON inputs must be JSON objects\n")
+        return 2
+
+    diff = diff_blast_reports(before_data, after_data)
+    if args.format == "json":
+        _write_output(json.dumps(diff, indent=2) + "\n", args.output)
+    else:
+        lines: list[str] = [
+            f"secpol-audit blast-diff: {diff['before_policy']} -> {diff['after_policy']}",
+            f"Completeness: {diff['before_completeness']} -> {diff['after_completeness']}",
+            f"Blast expansion: {'YES (FAIL)' if diff['blast_expanded'] else 'NO (PASS)'}",
+        ]
+        for origin_name, delta in sorted(diff["origin_deltas"].items()):
+            lines.append(
+                f"  {origin_name}: reachable {delta['reachable_before']} -> {delta['reachable_after']}"
+            )
+            if delta["removed_sinks"]:
+                lines.append(f"    - Eliminated sinks: {', '.join(delta['removed_sinks'])}")
+            if delta["added_sinks"]:
+                lines.append(f"    + Added sinks: {', '.join(delta['added_sinks'])}")
+            if delta["removed_chains"]:
+                lines.append(f"    - Eliminated chains: {', '.join(delta['removed_chains'])}")
+            if delta["added_chains"]:
+                lines.append(f"    + Added chains: {', '.join(delta['added_chains'])}")
+        _write_output("\n".join(lines) + "\n", args.output)
+
+    return 1 if diff["blast_expanded"] else 0
 
 
 def main(argv: Sequence[str] | None = None) -> int:

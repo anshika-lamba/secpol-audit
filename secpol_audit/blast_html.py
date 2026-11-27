@@ -1,0 +1,1017 @@
+"""Single-file offline Concentric Blast-Radius HTML/SVG Explorer for `secpol-audit blast`.
+
+Zero external URLs (`http://` / `https://`), zero external fonts/CDNs, 100% deterministic.
+"""
+
+from __future__ import annotations
+
+import html
+import json
+from typing import Any
+
+from secpol_audit.blast import BlastReport
+
+
+def _safe_json_for_script(obj: Any) -> str:
+    """Serialize JSON safely for embedding inside an inline `<script>` tag."""
+    return json.dumps(obj, separators=(",", ":")).replace("</", "<\\/")
+
+
+def render_blast_html(
+    report: BlastReport,
+    *,
+    after_report: BlastReport | None = None,
+) -> str:
+    """Render a self-contained obsidian concentric blast-radius explorer HTML file."""
+    before_payload = report.to_dict()
+    after_payload = after_report.to_dict() if after_report is not None else None
+
+    comp = report.completeness
+    short_hash = comp.policy_hash[:12]
+    comp_cls = (
+        "pill-emerald"
+        if comp.result == "COMPLETE"
+        else ("pill-crimson" if comp.result == "MISMATCH" else "pill-amber")
+    )
+    comp_label = f"{comp.result} \u00b7 dropped={comp.dropped_events}"
+
+    has_diff_attr = "true" if after_payload is not None else "false"
+    data_blob = _safe_json_for_script(
+        {
+            "before": before_payload,
+            "after": after_payload,
+        }
+    )
+
+    page_title = html.escape(f"secpol-audit blast \u2014 {report.policy_path}")
+    target_badge = html.escape(comp.target)
+
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>{page_title}</title>
+<style>
+  :root {{
+    --bg: #090D16;
+    --surface: #0F1623;
+    --surface-2: #131C2E;
+    --border: #1E293B;
+    --grid: #182235;
+    --text: #E2E8F0;
+    --text-muted: #94A3B8;
+    --text-dim: #64748B;
+    --crimson: #F43F5E;
+    --crimson-bg: rgba(244, 63, 94, 0.12);
+    --amber: #F59E0B;
+    --amber-bg: rgba(245, 158, 11, 0.12);
+    --emerald: #10B981;
+    --emerald-bg: rgba(16, 185, 129, 0.12);
+    --slate: #64748B;
+    --slate-bg: rgba(100, 116, 139, 0.14);
+    --sans: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  }}
+  * {{ box-sizing: border-box; }}
+  html, body {{
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 13px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }}
+  .mono {{
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+  }}
+
+  /* 1. Top Command Bar */
+  .topbar {{
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 20px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    flex-wrap: wrap;
+  }}
+  .brand-group {{
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+  }}
+  .brand {{
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 600;
+    font-size: 14px;
+    letter-spacing: -0.01em;
+    color: #F8FAFC;
+  }}
+  .brand-dot {{
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--crimson);
+    box-shadow: 0 0 0 3px var(--crimson-bg);
+  }}
+  .chip {{
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 9px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    color: var(--text-muted);
+    font-size: 11px;
+    font-weight: 500;
+  }}
+  .pill-emerald {{
+    border-color: rgba(16, 185, 129, 0.38);
+    background: var(--emerald-bg);
+    color: var(--emerald);
+  }}
+  .pill-amber {{
+    border-color: rgba(245, 158, 11, 0.38);
+    background: var(--amber-bg);
+    color: var(--amber);
+  }}
+  .pill-crimson {{
+    border-color: rgba(244, 63, 94, 0.42);
+    background: var(--crimson-bg);
+    color: var(--crimson);
+  }}
+  .pill-slate {{
+    border-color: rgba(100, 116, 139, 0.38);
+    background: var(--slate-bg);
+    color: #CBD5E1;
+  }}
+
+  .shell {{
+    max-width: 1480px;
+    margin: 0 auto;
+    padding: 16px 20px 28px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }}
+
+  /* 2. KPI Strip */
+  .kpi-grid {{
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 12px;
+  }}
+  .kpi-card {{
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }}
+  .kpi-label {{
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-dim);
+    font-weight: 600;
+  }}
+  .kpi-value {{
+    font-size: 22px;
+    font-weight: 600;
+    color: #F8FAFC;
+    line-height: 1.2;
+  }}
+  .kpi-sub {{
+    font-size: 11px;
+    color: var(--text-muted);
+  }}
+
+  /* 3. Main Split Workspace (65% Left / 35% Right) */
+  .workspace {{
+    display: grid;
+    grid-template-columns: minmax(0, 1.85fr) minmax(320px, 1fr);
+    gap: 14px;
+    align-items: stretch;
+  }}
+  .panel {{
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }}
+  .panel-header {{
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    background: rgba(19, 28, 46, 0.55);
+    flex-wrap: wrap;
+  }}
+  .panel-title {{
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: #F1F5F9;
+  }}
+
+  /* Origin selector & segmented diff toggle */
+  .controls-bar {{
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    flex-wrap: wrap;
+  }}
+  .pill-row {{
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+  }}
+  .origin-pill {{
+    appearance: none;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text-muted);
+    font-family: var(--mono);
+    font-size: 11px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    cursor: pointer;
+    transition: border-color 200ms ease, color 200ms ease, background 200ms ease;
+  }}
+  .origin-pill:hover {{
+    border-color: #334155;
+    color: #F8FAFC;
+  }}
+  .origin-pill.active {{
+    border-color: var(--crimson);
+    background: var(--crimson-bg);
+    color: #FFE4E6;
+  }}
+  .origin-pill.has-sink::after {{
+    content: "";
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--crimson);
+    margin-left: 6px;
+    vertical-align: middle;
+  }}
+  .seg-toggle {{
+    display: inline-flex;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 2px;
+  }}
+  .seg-btn {{
+    appearance: none;
+    border: 0;
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 11px;
+    font-weight: 500;
+    padding: 3px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background 200ms ease, color 200ms ease;
+  }}
+  .seg-btn.active {{
+    background: var(--surface-2);
+    color: #F8FAFC;
+  }}
+
+  /* Concentric SVG Radar */
+  .radar-wrap {{
+    position: relative;
+    padding: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 520px;
+    background: radial-gradient(circle at center, #0D1526 0%, #090D16 74%);
+  }}
+  #blast-svg {{
+    width: 100%;
+    max-width: 720px;
+    height: auto;
+    display: block;
+    user-select: none;
+  }}
+  .radar-ring {{
+    fill: none;
+    stroke: var(--grid);
+    stroke-width: 1;
+  }}
+  .radar-ring-sink {{
+    stroke: rgba(244, 63, 94, 0.24);
+    stroke-dasharray: 4 4;
+  }}
+  .ring-caption {{
+    fill: var(--text-dim);
+    font-size: 10px;
+    font-family: var(--mono);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }}
+  .edge-path {{
+    fill: none;
+    cursor: pointer;
+    transition: opacity 200ms ease, stroke-width 200ms ease;
+  }}
+  .edge-escalation {{
+    stroke: var(--crimson);
+    stroke-width: 2;
+  }}
+  .edge-review {{
+    stroke: var(--slate);
+    stroke-width: 1.5;
+    stroke-dasharray: 5 4;
+  }}
+  .edge-path:hover, .edge-path.selected {{
+    stroke-width: 3;
+    opacity: 1;
+  }}
+  .node-group {{
+    cursor: pointer;
+    transition: transform 200ms ease, opacity 200ms ease;
+  }}
+  .node-pill {{
+    fill: var(--surface);
+    stroke: var(--border);
+    stroke-width: 1.25;
+    transition: stroke 200ms ease, fill 200ms ease;
+  }}
+  .node-group:hover .node-pill, .node-group.selected .node-pill {{
+    stroke: #F8FAFC;
+    fill: #172136;
+  }}
+  .node-ring-0 .node-pill {{
+    stroke: var(--amber);
+    fill: #1A1710;
+  }}
+  .node-ring-2 .node-pill {{
+    stroke: rgba(245, 158, 11, 0.65);
+  }}
+  .node-ring-3 .node-pill {{
+    stroke: var(--crimson);
+    fill: #1D1018;
+  }}
+  .node-label {{
+    fill: #F1F5F9;
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 600;
+  }}
+  .node-sub {{
+    fill: var(--text-muted);
+    font-family: var(--mono);
+    font-size: 9px;
+  }}
+
+  .legend-bar {{
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 8px 14px;
+    border-top: 1px solid var(--border);
+    font-size: 11px;
+    color: var(--text-muted);
+    flex-wrap: wrap;
+  }}
+  .legend-item {{
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }}
+  .swatch-line {{
+    width: 16px;
+    height: 2px;
+    display: inline-block;
+  }}
+
+  /* Right Evidence Inspector */
+  .inspector-body {{
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    flex: 1;
+  }}
+  .receipt-table {{
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }}
+  .receipt-table th {{
+    text-align: left;
+    color: var(--text-dim);
+    font-weight: 500;
+    padding: 6px 8px 6px 0;
+    border-bottom: 1px solid var(--border);
+    width: 42%;
+    vertical-align: top;
+  }}
+  .receipt-table td {{
+    padding: 6px 0;
+    border-bottom: 1px solid var(--border);
+    color: #F1F5F9;
+    word-break: break-word;
+  }}
+  .terminal-box {{
+    background: #060910;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-family: var(--mono);
+    font-size: 11px;
+    line-height: 1.55;
+    color: #CBD5E1;
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }}
+  .term-label {{
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-dim);
+    margin-bottom: 6px;
+    display: block;
+  }}
+  .term-ln {{
+    color: var(--text-dim);
+    margin-right: 8px;
+    user-select: none;
+  }}
+
+  /* Bottom Collapsible Full Evidence Matrix */
+  details.matrix-panel {{
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+  }}
+  details.matrix-panel > summary {{
+    list-style: none;
+    cursor: pointer;
+    padding: 11px 14px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: rgba(19, 28, 46, 0.55);
+    border-bottom: 1px solid var(--border);
+    font-weight: 600;
+    font-size: 12px;
+    color: #F1F5F9;
+  }}
+  details.matrix-panel > summary::-webkit-details-marker {{ display: none; }}
+  .matrix-controls {{
+    padding: 10px 14px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    border-bottom: 1px solid var(--border);
+    flex-wrap: wrap;
+  }}
+  .filter-pill {{
+    appearance: none;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text-muted);
+    font-size: 11px;
+    padding: 3px 10px;
+    border-radius: 999px;
+    cursor: pointer;
+  }}
+  .filter-pill.active {{
+    border-color: #475569;
+    background: var(--surface-2);
+    color: #F8FAFC;
+  }}
+  .matrix-scroll {{
+    overflow-x: auto;
+  }}
+  table.matrix {{
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }}
+  table.matrix th {{
+    text-align: left;
+    padding: 8px 12px;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-dim);
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }}
+  table.matrix td {{
+    padding: 8px 12px;
+    border-bottom: 1px solid rgba(30, 41, 59, 0.65);
+    white-space: nowrap;
+  }}
+  table.matrix tbody tr {{
+    cursor: pointer;
+    transition: background 150ms ease;
+  }}
+  table.matrix tbody tr:hover {{
+    background: rgba(30, 41, 59, 0.45);
+  }}
+
+  @media (max-width: 1024px) {{
+    .kpi-grid {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
+    .workspace {{ grid-template-columns: 1fr; }}
+  }}
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand-group">
+    <span class="brand"><span class="brand-dot"></span>secpol-audit</span>
+    <span class="chip">{target_badge}</span>
+    <span class="chip mono" id="chip-hash">sha256:{short_hash}</span>
+  </div>
+  <span class="chip mono {comp_cls}" id="chip-completeness">{html.escape(comp_label)}</span>
+</header>
+
+<main class="shell">
+  <section class="kpi-grid" aria-label="Blast Radius Metrics">
+    <div class="kpi-card">
+      <span class="kpi-label">Reachable Types</span>
+      <span class="kpi-value mono" id="kpi-reachable">0</span>
+      <span class="kpi-sub" id="kpi-reachable-sub">from active origin</span>
+    </div>
+    <div class="kpi-card">
+      <span class="kpi-label">Confirmed Syscalls</span>
+      <span class="kpi-value mono" id="kpi-syscalls">0</span>
+      <span class="kpi-sub" id="kpi-syscalls-sub">KPROBE_JSON completed</span>
+    </div>
+    <div class="kpi-card">
+      <span class="kpi-label">Kernel-Correlated Events</span>
+      <span class="kpi-value mono" id="kpi-correlated">0</span>
+      <span class="kpi-sub" id="kpi-correlated-sub">SECPOLEV_JSON witnessed</span>
+    </div>
+    <div class="kpi-card">
+      <span class="kpi-label">Dropped Trace Events</span>
+      <span class="kpi-value mono" id="kpi-dropped">0</span>
+      <span class="kpi-sub" id="kpi-dropped-sub">secpolev_get_dropped_count()</span>
+    </div>
+  </section>
+
+  <section class="workspace">
+    <div class="panel">
+      <div class="controls-bar">
+        <div class="pill-row" id="origin-pills" role="tablist" aria-label="Compromised Origin Type"></div>
+        <div class="seg-toggle" id="diff-toggle" style="display:none;" data-has-diff="{has_diff_attr}">
+          <button type="button" class="seg-btn active" data-mode="before">Before</button>
+          <button type="button" class="seg-btn" data-mode="after">After</button>
+        </div>
+      </div>
+      <div class="radar-wrap">
+        <svg id="blast-svg" viewBox="0 0 720 560" role="img" aria-label="Concentric Blast Radius Diagram"></svg>
+      </div>
+      <div class="legend-bar">
+        <span class="legend-item"><span class="swatch-line" style="background:#F43F5E;"></span>Escalation (settypeid / derive_type)</span>
+        <span class="legend-item"><span class="swatch-line" style="border-top:2px dashed #64748B;"></span>Review-Only IPC (channel_connect)</span>
+        <span class="legend-item"><span class="chip pill-emerald" style="padding:1px 6px;">OBSERVED_AND_CORRELATED</span></span>
+        <span class="legend-item"><span class="chip pill-amber" style="padding:1px 6px;">SYSCALL_ONLY_UNOBSERVABLE</span></span>
+        <span class="legend-item"><span class="chip pill-slate" style="padding:1px 6px;">STATIC_ONLY</span></span>
+      </div>
+    </div>
+
+    <aside class="panel" aria-label="3-Way Evidence Receipt Drawer">
+      <div class="panel-header">
+        <span class="panel-title">3-Way Evidence Receipt</span>
+        <span class="chip mono pill-slate" id="drawer-id">SELECT NODE / EDGE</span>
+      </div>
+      <div class="inspector-body" id="inspector-body">
+        <table class="receipt-table">
+          <tbody>
+            <tr><th>Origin</th><td class="mono" id="rec-origin">-</td></tr>
+            <tr><th>Mechanism</th><td class="mono" id="rec-op">-</td></tr>
+            <tr><th>Destination</th><td class="mono" id="rec-target">-</td></tr>
+            <tr><th>Hop / Ring</th><td class="mono" id="rec-hop">-</td></tr>
+            <tr><th>Static Prediction</th><td class="mono" id="rec-static">-</td></tr>
+            <tr><th>Syscall (KPROBE_JSON)</th><td class="mono" id="rec-syscall">-</td></tr>
+            <tr><th>Kernel Witness (SECPOLEV)</th><td class="mono" id="rec-witness">-</td></tr>
+            <tr><th>Evidence State</th><td id="rec-state">-</td></tr>
+          </tbody>
+        </table>
+        <div class="terminal-box" id="rec-terminal">
+          <span class="term-label">Verbatim QEMU Serial Log Lines</span>
+          <div id="rec-log-lines">Click any ring node, arrow, or matrix row to inspect exact serial evidence.</div>
+        </div>
+      </div>
+    </aside>
+  </section>
+
+  <details class="matrix-panel" open>
+    <summary>
+      <span>Full Evidence Matrix</span>
+      <span class="chip mono" id="matrix-count">0 rows</span>
+    </summary>
+    <div class="matrix-controls" id="matrix-filters">
+      <button type="button" class="filter-pill active" data-filter="all">All</button>
+      <button type="button" class="filter-pill" data-filter="escalation">Escalation</button>
+      <button type="button" class="filter-pill" data-filter="correlated">Correlated</button>
+      <button type="button" class="filter-pill" data-filter="denied">Denied</button>
+    </div>
+    <div class="matrix-scroll">
+      <table class="matrix">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Origin</th>
+            <th>Mechanism</th>
+            <th>Target</th>
+            <th>Hop</th>
+            <th>Static</th>
+            <th>Syscall</th>
+            <th>Kernel Witness</th>
+            <th>Evidence State</th>
+          </tr>
+        </thead>
+        <tbody id="matrix-tbody"></tbody>
+      </table>
+    </div>
+  </details>
+</main>
+
+<script>
+const BLAST_DATA = {data_blob};
+
+let activeMode = "before";
+let activeOrigin = BLAST_DATA.before.selected_origin || "";
+let activeFilter = "all";
+let selectedReceiptId = null;
+
+function activeReport() {{
+  if (activeMode === "after" && BLAST_DATA.after) return BLAST_DATA.after;
+  return BLAST_DATA.before;
+}}
+
+function escapeHtml(s) {{
+  return String(s ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}}
+
+function statePillHtml(state) {{
+  let cls = "pill-slate";
+  if (state === "OBSERVED_AND_CORRELATED") cls = "pill-emerald";
+  else if (state === "SYSCALL_ONLY_UNOBSERVABLE") cls = "pill-amber";
+  return `<span class="chip mono ${{cls}}" style="padding:2px 7px;">${{escapeHtml(state)}}</span>`;
+}}
+
+function outcomeBadge(val) {{
+  if (!val) return '<span style="color:#64748B;">not probed</span>';
+  if (val === "ALLOW" || val === "OK") return `<span style="color:#F43F5E;font-weight:600;">${{escapeHtml(val)}}</span>`;
+  return `<span style="color:#10B981;font-weight:600;">${{escapeHtml(val)}}</span>`;
+}}
+
+function renderTopAndKpis() {{
+  const rep = activeReport();
+  const comp = rep.completeness;
+  const view = rep.origins[activeOrigin] || Object.values(rep.origins)[0];
+
+  document.getElementById("chip-hash").textContent = "sha256:" + (comp.policy_hash || "").slice(0, 12);
+  const compEl = document.getElementById("chip-completeness");
+  compEl.textContent = `${{comp.result}} \u00b7 dropped=${{comp.dropped_events}}`;
+  compEl.className = "chip mono " + (
+    comp.result === "COMPLETE" ? "pill-emerald" :
+    comp.result === "MISMATCH" ? "pill-crimson" : "pill-amber"
+  );
+
+  const reachCount = view ? view.reachable_types_count : 0;
+  const sinkCount = view ? view.reachable_sinks.length : 0;
+  document.getElementById("kpi-reachable").textContent = String(reachCount);
+  document.getElementById("kpi-reachable-sub").textContent = `${{sinkCount}} privileged sink(s) from ${{activeOrigin || "-"}}`;
+
+  document.getElementById("kpi-syscalls").textContent = `${{comp.probes_completed}}/${{comp.probes_total}}`;
+  document.getElementById("kpi-syscalls-sub").textContent = comp.mismatches > 0 ? `${{comp.mismatches}} mismatch(es)` : "0 model mismatches";
+
+  document.getElementById("kpi-correlated").textContent = String(comp.kernel_events_correlated);
+  document.getElementById("kpi-correlated-sub").textContent = `${{comp.unobservable_operations}} syscall-only unobservable`;
+
+  const droppedEl = document.getElementById("kpi-dropped");
+  droppedEl.textContent = String(comp.dropped_events);
+  droppedEl.style.color = comp.dropped_events === 0 ? "#10B981" : "#F43F5E";
+}}
+
+function renderOriginPills() {{
+  const rep = activeReport();
+  const wrap = document.getElementById("origin-pills");
+  wrap.innerHTML = "";
+  const names = Object.keys(rep.origins).sort();
+  if (!rep.origins[activeOrigin] && names.length) activeOrigin = names[0];
+
+  for (const name of names) {{
+    const view = rep.origins[name];
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "origin-pill" +
+      (name === activeOrigin ? " active" : "") +
+      (view.reachable_sinks.length > 0 ? " has-sink" : "");
+    btn.textContent = name;
+    btn.addEventListener("click", () => {{
+      activeOrigin = name;
+      selectedReceiptId = null;
+      renderAll();
+    }});
+    wrap.appendChild(btn);
+  }}
+}}
+
+function renderRadar() {{
+  const rep = activeReport();
+  const view = rep.origins[activeOrigin];
+  const svg = document.getElementById("blast-svg");
+  if (!view) {{
+    svg.innerHTML = "";
+    return;
+  }}
+
+  const cx = 360, cy = 285;
+  const radii = {{ 0: 0, 1: 105, 2: 185, 3: 255 }};
+  const captions = [
+    [1, "RING 1 \u00b7 DIRECT IPC / PATHS"],
+    [2, "RING 2 \u00b7 HOP-1 SETTYPEID"],
+    [3, "RING 3 \u00b7 HOP-2+ PRIVILEGED SINKS"],
+  ];
+
+  // Position nodes deterministically on their assigned ring
+  const byRing = {{ 0: [], 1: [], 2: [], 3: [] }};
+  for (const n of view.nodes) {{
+    (byRing[n.ring] || byRing[3]).push(n);
+  }}
+
+  const pos = {{}};
+  pos[view.origin] = {{ x: cx, y: cy }};
+  for (const r of [1, 2, 3]) {{
+    const list = byRing[r];
+    const rad = radii[r];
+    const count = list.length;
+    list.forEach((n, idx) => {{
+      const baseAngle = r === 1 ? -Math.PI * 0.78 : (r === 2 ? -Math.PI * 0.15 : Math.PI * 0.12);
+      const step = count > 0 ? (2 * Math.PI) / count : 0;
+      const angle = baseAngle + idx * step;
+      pos[n.name] = {{
+        x: Math.round(cx + rad * Math.cos(angle)),
+        y: Math.round(cy + rad * Math.sin(angle)),
+      }};
+    }});
+  }}
+
+  let htmlParts = [];
+  htmlParts.push(`
+    <defs>
+      <marker id="arrow-esc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 1 L 10 5 L 0 9 z" fill="#F43F5E" />
+      </marker>
+      <marker id="arrow-rev" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 1 L 10 5 L 0 9 z" fill="#64748B" />
+      </marker>
+    </defs>
+  `);
+
+  // Subtle crosshairs + concentric rings
+  htmlParts.push(`<line x1="${{cx}}" y1="20" x2="${{cx}}" y2="550" stroke="#131C2E" stroke-width="1" />`);
+  htmlParts.push(`<line x1="60" y1="${{cy}}" x2="660" y2="${{cy}}" stroke="#131C2E" stroke-width="1" />`);
+
+  for (const [r, label] of captions) {{
+    const rad = radii[r];
+    const cls = r === 3 ? "radar-ring radar-ring-sink" : "radar-ring";
+    htmlParts.push(`<circle cx="${{cx}}" cy="${{cy}}" r="${{rad}}" class="${{cls}}" />`);
+    htmlParts.push(`<text x="${{cx}}" y="${{cy - rad - 6}}" text-anchor="middle" class="ring-caption">${{label}}</text>`);
+  }}
+
+  // Draw edges between positioned nodes
+  for (const rec of view.receipts) {{
+    const srcPt = pos[rec.origin];
+    const dstName = rec.resolved_target_type || rec.target;
+    const dstPt = pos[dstName];
+    if (!srcPt || !dstPt || rec.origin === dstName) continue;
+    const isEsc = rec.edge_kind === "ESCALATION";
+    const dx = dstPt.x - srcPt.x;
+    const dy = dstPt.y - srcPt.y;
+    const dist = Math.hypot(dx, dy) || 1;
+    const ux = dx / dist, uy = dy / dist;
+    const sx = srcPt.x + ux * 28, sy = srcPt.y + uy * 18;
+    const ex = dstPt.x - ux * 42, ey = dstPt.y - uy * 20;
+    const mx = (sx + ex) / 2 - uy * (isEsc ? 16 : -22);
+    const my = (sy + ey) / 2 + ux * (isEsc ? 16 : -22);
+    const sel = rec.receipt_id === selectedReceiptId ? " selected" : "";
+    const cls = (isEsc ? "edge-path edge-escalation" : "edge-path edge-review") + sel;
+    const marker = isEsc ? "url(#arrow-esc)" : "url(#arrow-rev)";
+    htmlParts.push(
+      `<path d="M ${{sx.toFixed(1)}} ${{sy.toFixed(1)}} Q ${{mx.toFixed(1)}} ${{my.toFixed(1)}} ${{ex.toFixed(1)}} ${{ey.toFixed(1)}}" ` +
+      `class="${{cls}}" marker-end="${{marker}}" data-receipt="${{escapeHtml(rec.receipt_id)}}" />`
+    );
+  }}
+
+  // Draw node pills
+  for (const n of view.nodes) {{
+    const pt = pos[n.name];
+    if (!pt) continue;
+    const w = Math.max(108, n.name.length * 7.4 + 26);
+    const h = 34;
+    const rx = pt.x - w / 2;
+    const ry = pt.y - h / 2;
+    const sub = n.ring === 0 ? "RING 0 \u00b7 ORIGIN" : (n.is_sink ? `RING ${{n.ring}} \u00b7 SINK` : `RING ${{n.ring}} \u00b7 ${{n.reach_mechanism}}`);
+    htmlParts.push(
+      `<g class="node-group node-ring-${{n.ring}}" data-node="${{escapeHtml(n.name)}}">` +
+      `<rect x="${{rx.toFixed(1)}}" y="${{ry.toFixed(1)}}" width="${{w.toFixed(1)}}" height="${{h}}" rx="7" class="node-pill" />` +
+      `<text x="${{pt.x}}" y="${{pt.y - 2}}" text-anchor="middle" class="node-label">${{escapeHtml(n.name)}}</text>` +
+      `<text x="${{pt.x}}" y="${{pt.y + 11}}" text-anchor="middle" class="node-sub">${{escapeHtml(sub)}}</text>` +
+      `</g>`
+    );
+  }}
+
+  svg.innerHTML = htmlParts.join("");
+
+  svg.querySelectorAll(".edge-path").forEach((el) => {{
+    el.addEventListener("click", () => {{
+      const rid = el.getAttribute("data-receipt");
+      const rec = view.receipts.find((r) => r.receipt_id === rid);
+      if (rec) {{
+        selectedReceiptId = rec.receipt_id;
+        showReceipt(rec);
+        renderRadar();
+      }}
+    }});
+  }});
+
+  svg.querySelectorAll(".node-group").forEach((el) => {{
+    el.addEventListener("click", () => {{
+      const name = el.getAttribute("data-node");
+      const match = view.receipts.find((r) => (r.resolved_target_type || r.target) === name) ||
+                    view.receipts.find((r) => r.origin === name);
+      if (match) {{
+        selectedReceiptId = match.receipt_id;
+        showReceipt(match);
+        renderRadar();
+      }} else {{
+        const nodeObj = view.nodes.find((n) => n.name === name);
+        if (nodeObj) showNodeSummary(nodeObj);
+      }}
+    }});
+  }});
+}}
+
+function showNodeSummary(nodeObj) {{
+  document.getElementById("drawer-id").textContent = "NODE \u00b7 RING " + nodeObj.ring;
+  document.getElementById("rec-origin").textContent = nodeObj.name;
+  document.getElementById("rec-op").textContent = nodeObj.reach_mechanism;
+  document.getElementById("rec-target").textContent = nodeObj.attaches.join(", ") || "(no attach paths)";
+  document.getElementById("rec-hop").textContent = `Hop ${{nodeObj.hop}} / Ring ${{nodeObj.ring}}`;
+  document.getElementById("rec-static").textContent = nodeObj.abilities.join(", ") || "(none)";
+  document.getElementById("rec-syscall").textContent = "-";
+  document.getElementById("rec-witness").textContent = "-";
+  document.getElementById("rec-state").innerHTML = statePillHtml(nodeObj.evidence_state);
+  document.getElementById("rec-log-lines").textContent =
+    nodeObj.sink_reasons.length
+      ? "Privileged sink capabilities: " + nodeObj.sink_reasons.join(", ")
+      : "No direct syscall probe attached to origin node itself; click an outgoing edge or matrix row.";
+}}
+
+function showReceipt(rec) {{
+  document.getElementById("drawer-id").textContent = rec.receipt_id;
+  document.getElementById("rec-origin").textContent = rec.origin;
+  document.getElementById("rec-op").textContent = `${{rec.op}} (${{rec.edge_kind}})`;
+  document.getElementById("rec-target").textContent =
+    rec.resolved_target_type && rec.resolved_target_type !== rec.target
+      ? `${{rec.target}} \u2192 ${{rec.resolved_target_type}}`
+      : rec.target;
+  document.getElementById("rec-hop").textContent = `Hop ${{rec.hop}} / Ring ${{rec.ring}}`;
+  document.getElementById("rec-static").innerHTML = outcomeBadge(rec.static_prediction);
+  document.getElementById("rec-syscall").innerHTML = rec.syscall_outcome
+    ? `${{outcomeBadge(rec.syscall_outcome)}} <span style="color:#94A3B8;">(errno=${{rec.syscall_errno}}, L${{rec.syscall_line}})</span>`
+    : '<span style="color:#64748B;">not probed</span>';
+  document.getElementById("rec-witness").innerHTML = rec.kernel_witness_verdict
+    ? `${{outcomeBadge(rec.kernel_witness_verdict)}} <span style="color:#94A3B8;">(L${{rec.kernel_witness_line}})</span>`
+    : '<span style="color:#64748B;">unobservable / absent</span>';
+  document.getElementById("rec-state").innerHTML = statePillHtml(rec.evidence_state);
+
+  const lines = [];
+  if (rec.syscall_raw) {{
+    lines.push(`<span class="term-ln">L${{rec.syscall_line}}</span>${{escapeHtml(rec.syscall_raw)}}`);
+  }}
+  if (rec.kernel_witness_raw) {{
+    lines.push(`<span class="term-ln">L${{rec.kernel_witness_line}}</span>${{escapeHtml(rec.kernel_witness_raw)}}`);
+  }}
+  document.getElementById("rec-log-lines").innerHTML = lines.length
+    ? lines.join("<br />")
+    : '<span style="color:#64748B;">Static-only prediction — run on-target kprobe + libsecpolev verification boot to attach serial log lines.</span>';
+}}
+
+function renderMatrix() {{
+  const rep = activeReport();
+  const rows = rep.receipts.filter((r) => {{
+    if (activeFilter === "escalation") return r.edge_kind === "ESCALATION";
+    if (activeFilter === "correlated") return r.evidence_state === "OBSERVED_AND_CORRELATED";
+    if (activeFilter === "denied") return r.syscall_outcome === "DENY" || r.static_prediction === "DENY";
+    return true;
+  }});
+
+  document.getElementById("matrix-count").textContent = `${{rows.length}} row${{rows.length === 1 ? "" : "s"}}`;
+  const tbody = document.getElementById("matrix-tbody");
+  tbody.innerHTML = rows.map((r) => `
+    <tr data-rid="${{escapeHtml(r.receipt_id)}}">
+      <td class="mono" style="color:#94A3B8;">${{escapeHtml(r.receipt_id)}}</td>
+      <td class="mono">${{escapeHtml(r.origin)}}</td>
+      <td class="mono">${{escapeHtml(r.op)}}</td>
+      <td class="mono">${{escapeHtml(r.target)}}</td>
+      <td class="mono">${{r.hop}}</td>
+      <td class="mono">${{outcomeBadge(r.static_prediction)}}</td>
+      <td class="mono">${{r.syscall_outcome ? outcomeBadge(r.syscall_outcome) + " (e=" + r.syscall_errno + ")" : '<span style="color:#64748B;">-</span>'}}</td>
+      <td class="mono">${{r.kernel_witness_verdict ? outcomeBadge(r.kernel_witness_verdict) + " (L" + r.kernel_witness_line + ")" : '<span style="color:#64748B;">-</span>'}}</td>
+      <td>${{statePillHtml(r.evidence_state)}}</td>
+    </tr>
+  `).join("");
+
+  tbody.querySelectorAll("tr").forEach((tr) => {{
+    tr.addEventListener("click", () => {{
+      const rid = tr.getAttribute("data-rid");
+      const rec = rep.receipts.find((x) => x.receipt_id === rid);
+      if (rec) {{
+        selectedReceiptId = rec.receipt_id;
+        if (rep.origins[rec.origin]) activeOrigin = rec.origin;
+        renderOriginPills();
+        renderTopAndKpis();
+        renderRadar();
+        showReceipt(rec);
+      }}
+    }});
+  }});
+}}
+
+function renderAll() {{
+  renderOriginPills();
+  renderTopAndKpis();
+  renderRadar();
+  renderMatrix();
+
+  const rep = activeReport();
+  const view = rep.origins[activeOrigin];
+  if (view && !selectedReceiptId) {{
+    const first = view.receipts.find((r) => r.edge_kind === "ESCALATION") || view.receipts[0];
+    if (first) {{
+      selectedReceiptId = first.receipt_id;
+      showReceipt(first);
+    }} else if (view.nodes[0]) {{
+      showNodeSummary(view.nodes[0]);
+    }}
+  }}
+}}
+
+// Initialize Before/After toggle if diff data present
+const diffToggle = document.getElementById("diff-toggle");
+if (BLAST_DATA.after) {{
+  diffToggle.style.display = "inline-flex";
+  diffToggle.querySelectorAll(".seg-btn").forEach((btn) => {{
+    btn.addEventListener("click", () => {{
+      activeMode = btn.getAttribute("data-mode");
+      diffToggle.querySelectorAll(".seg-btn").forEach((b) => b.classList.toggle("active", b === btn));
+      selectedReceiptId = null;
+      renderAll();
+    }});
+  }});
+}}
+
+document.getElementById("matrix-filters").querySelectorAll(".filter-pill").forEach((btn) => {{
+  btn.addEventListener("click", () => {{
+    activeFilter = btn.getAttribute("data-filter");
+    document.querySelectorAll(".filter-pill").forEach((b) => b.classList.toggle("active", b === btn));
+    renderMatrix();
+  }});
+}});
+
+renderAll();
+</script>
+</body>
+</html>
+"""

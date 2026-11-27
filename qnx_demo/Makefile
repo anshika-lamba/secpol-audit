@@ -11,10 +11,12 @@ MKIFS         ?= mkifs
 BUILD_DIR     := build
 BINARIES      := $(BUILD_DIR)/can_server $(BUILD_DIR)/diag_helper $(BUILD_DIR)/ivi_exploit
 SENTRY_BINS   := $(BINARIES) $(BUILD_DIR)/secpol_sentry
+BLAST_BINS    := $(BUILD_DIR)/can_server $(BUILD_DIR)/secpol_sentry $(BUILD_DIR)/kprobe
 MUTANTS       := M0_clean M1_no_connect M2_untyped_server M3_2hop_escalate M3_fixed
 SENTRY_MUTANTS := M0_sentry_clean M3_sentry_escalate
+BLAST_MUTANTS  := M0_blast_clean M3_blast_escalate
 
-.PHONY: all binaries images sentry-binaries sentry-images secpolgen-image clean check-sdp
+.PHONY: all binaries images sentry-binaries sentry-images blast-binaries blast-images secpolgen-image clean check-sdp
 
 all: binaries images
 
@@ -43,7 +45,12 @@ $(BUILD_DIR)/secpol_sentry: secpol_sentry.c | $(BUILD_DIR)
 $(BUILD_DIR)/dump_file: dump_file.c | $(BUILD_DIR)
 	$(CC) $(TARGET_FLAGS) $(CFLAGS) -o $@ $<
 
+$(BUILD_DIR)/kprobe: kprobe.c | $(BUILD_DIR)
+	$(CC) $(TARGET_FLAGS) $(CFLAGS) -o $@ $< $(LDFLAGS)
+
 sentry-binaries: check-sdp $(SENTRY_BINS)
+
+blast-binaries: check-sdp $(BLAST_BINS)
 
 # Compile mutant policies
 $(BUILD_DIR)/M0_clean.secpol.bin: mutants/M0_clean.secpol | $(BUILD_DIR)
@@ -103,9 +110,21 @@ $(BUILD_DIR)/M3_sentry_escalate.ifs: build_sentry.ifs.in $(BUILD_DIR)/M3_sentry_
 	    -e 's|@MUTANT_NAME@|M3_sentry_escalate|g' $< > $(BUILD_DIR)/M3_sentry_escalate.build
 	$(MKIFS) $(BUILD_DIR)/M3_sentry_escalate.build $@
 
+$(BUILD_DIR)/M0_blast_clean.ifs: build_blast.ifs.in $(BUILD_DIR)/M0_sentry_clean.secpol.bin $(BLAST_BINS)
+	sed -e 's|@SECPOL_BIN@|$(BUILD_DIR)/M0_sentry_clean.secpol.bin|g' \
+	    -e 's|@MUTANT_NAME@|M0_blast_clean|g' $< > $(BUILD_DIR)/M0_blast_clean.build
+	$(MKIFS) $(BUILD_DIR)/M0_blast_clean.build $@
+
+$(BUILD_DIR)/M3_blast_escalate.ifs: build_blast.ifs.in $(BUILD_DIR)/M3_sentry_escalate.secpol.bin $(BLAST_BINS)
+	sed -e 's|@SECPOL_BIN@|$(BUILD_DIR)/M3_sentry_escalate.secpol.bin|g' \
+	    -e 's|@MUTANT_NAME@|M3_blast_escalate|g' $< > $(BUILD_DIR)/M3_blast_escalate.build
+	$(MKIFS) $(BUILD_DIR)/M3_blast_escalate.build $@
+
 images: check-sdp $(addprefix $(BUILD_DIR)/,$(addsuffix .ifs,$(MUTANTS)))
 
 sentry-images: check-sdp $(addprefix $(BUILD_DIR)/,$(addsuffix .ifs,$(SENTRY_MUTANTS)))
+
+blast-images: check-sdp $(addprefix $(BUILD_DIR)/,$(addsuffix .ifs,$(BLAST_MUTANTS)))
 
 $(BUILD_DIR)/secpolgen_capture.ifs: secpolgen_capture.ifs $(BUILD_DIR)/can_server $(BUILD_DIR)/dump_file
 	$(MKIFS) $< $@

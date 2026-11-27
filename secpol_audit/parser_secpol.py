@@ -392,6 +392,11 @@ class SecpolParser:
     def _parse_type(self, ir: PolicyIR) -> None:
         start = self.advance()  # 'type'
         name_tok = self.expect("WORD", "type name")
+        if name_tok.value == "default_rules":
+            # QNX 8.0 `secpolgenerate` emits `type default_rules;` before
+            # `allow default_rules self:ability {};` to clear default abilities.
+            self.expect("SEMI", "';'")
+            return
         name = self._validate_ident(name_tok, "type")
 
         attrs: list[str] = []
@@ -794,8 +799,15 @@ class SecpolParser:
                     f"Dangling ability modifier(s) '{' '.join(pending_mods)}' without an ability",
                     close_brace,
                 )
-            if not abilities:
-                raise self.error("PARSE_ERROR", "Empty ability block '{}'", open_brace)
+            # Empty ability block `{}` is valid in QNX 8.0 for `default_rules`
+            # (emitted by stock `secpolgenerate`: `allow default_rules self:ability {};`),
+            # while empty blocks on normal user types remain a fail-closed parse error.
+            if not abilities and sources != ("default_rules",):
+                raise self.error(
+                    "PARSE_ERROR",
+                    "Empty ability block '{}' is not permitted for non-default_rules types",
+                    open_brace,
+                )
         else:
             pending_mods = []
             while self.peek().kind == "WORD" and self.peek().value in ABILITY_MODIFIERS:

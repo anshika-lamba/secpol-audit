@@ -50,6 +50,26 @@ jobs:
           which qcc secpolcompile mkifs qemu-system-x86_64
           make qemu-sentry
 
+      - name: Build kprobe blast images and boot independent QNX 8.0 verification
+        shell: bash
+        run: |
+          source /tmp/qnx800/qnxsdp-env.sh
+          make qemu-blast
+          if [ -f qnx_demo/build/blast/M0_blast_clean.log ]; then
+            secpol-audit blast qnx_demo/mutants/M0_sentry_clean.secpol \
+              --ifs qnx_demo/build_blast.ifs.in \
+              --log qnx_demo/build/blast/M0_blast_clean.log \
+              --completeness-out qnx_demo/build/blast/M0_blast_completeness.json \
+              --html qnx_demo/build/blast/M0_blast_explorer.html || true
+          fi
+          if [ -f qnx_demo/build/blast/M3_blast_escalate.log ]; then
+            secpol-audit blast qnx_demo/mutants/M3_sentry_escalate.secpol \
+              --ifs qnx_demo/build_blast.ifs.in \
+              --log qnx_demo/build/blast/M3_blast_escalate.log \
+              --completeness-out qnx_demo/build/blast/M3_blast_completeness.json \
+              --html qnx_demo/build/blast/M3_blast_explorer.html || true
+          fi
+
       - name: Build secpolgen_capture.ifs and boot stock QNX 8.0 secpolgenerate capture
         shell: bash
         run: |
@@ -100,4 +120,18 @@ jobs:
             qnx_demo/build/secpolgen/qnx8_generated.secpol
             qnx_demo/build/secpolgen/qnx8_unused.txt
             qnx_demo/build/secpolgen/qnx8_errors.txt
+          if-no-files-found: warn
+
+      - name: Upload real QNX 8.0 blast verification logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qnx8-blast-qemu-logs
+          path: |
+            qnx_demo/build/blast/M0_blast_clean.log
+            qnx_demo/build/blast/M3_blast_escalate.log
+            qnx_demo/build/blast/M0_blast_completeness.json
+            qnx_demo/build/blast/M3_blast_completeness.json
+            qnx_demo/build/blast/M0_blast_explorer.html
+            qnx_demo/build/blast/M3_blast_explorer.html
           if-no-files-found: warn
