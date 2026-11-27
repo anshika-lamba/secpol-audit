@@ -151,3 +151,28 @@ def test_generate_manifest_structure() -> None:
     assert "policies_sha256" in m
     assert "evidence_logs_sha256" in m
     assert "M0_sentry_clean.secpol" in m["policies_sha256"]
+
+
+def test_blast_one_to_one_pid_witness_rejects_duplicate_reuse() -> None:
+    pol = parse_secpol_file(M3_SECPOL)
+    # Two kprobes for ivi_ui_t settypeid with different PIDs, but only ONE SECPOLEV_JSON event
+    log_text = (
+        'KPROBE_JSON:{"origin":"ivi_ui_t","op":"settypeid","target":"diag_helper_t","pid":101,"ret":0,"outcome":"ALLOW","errno":0,"errno_name":"OK"}\n'
+        'KPROBE_JSON:{"origin":"ivi_ui_t","op":"settypeid","target":"can_hal_t","pid":102,"ret":-1,"outcome":"DENY","errno":1,"errno_name":"EPERM"}\n'
+        'SECPOLEV_JSON:{"ts_ns":1000,"pid":101,"verdict":"OK","proc":"proc/boot/kprobe","type":"ivi_ui_t","kind":"ability","ability":"settypeid","root":false}\n'
+        'SECPOLEV_STATS: ok=1 denied=0 dropped=0\n'
+    )
+    rep = analyze_blast(pol, log_text=log_text, log_path="<pid-1to1>")
+    assert rep.completeness.kernel_events_correlated == 1
+    assert rep.completeness.unobservable_operations == 1
+
+    # Duplicate probe with same PID 101 must NOT reuse the already-consumed SECPOLEV_JSON event
+    dup_log = (
+        'KPROBE_JSON:{"origin":"ivi_ui_t","op":"settypeid","target":"diag_helper_t","pid":101,"ret":0,"outcome":"ALLOW","errno":0,"errno_name":"OK"}\n'
+        'KPROBE_JSON:{"origin":"ivi_ui_t","op":"settypeid","target":"diag_helper_t","pid":101,"ret":0,"outcome":"ALLOW","errno":0,"errno_name":"OK"}\n'
+        'SECPOLEV_JSON:{"ts_ns":1000,"pid":101,"verdict":"OK","proc":"proc/boot/kprobe","type":"ivi_ui_t","kind":"ability","ability":"settypeid","root":false}\n'
+        'SECPOLEV_STATS: ok=1 denied=0 dropped=0\n'
+    )
+    rep_dup = analyze_blast(pol, log_text=dup_log, log_path="<pid-dup>")
+    assert rep_dup.completeness.kernel_events_correlated == 1
+    assert rep_dup.completeness.unobservable_operations == 1

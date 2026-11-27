@@ -83,6 +83,7 @@ class KprobeRecord:
     line: int
     raw: str
     path: str | None = None
+    pid: int | None = None
     ret: int | None = None
     errno_name: str | None = None
     classification: str | None = None
@@ -310,6 +311,7 @@ def parse_blast_log_text(
             if (not isinstance(target, str) or not target) and isinstance(path_val, str) and path_val:
                 target = path_val
             ret_val = obj.get("ret")
+            pid_val = obj.get("pid")
             err_num = obj.get("errno", 0)
             err_name = obj.get("errno_name")
             outcome = obj.get("outcome")
@@ -351,6 +353,7 @@ def parse_blast_log_text(
                     line=line_no,
                     raw=line,
                     path=path_val if isinstance(path_val, str) and path_val else None,
+                    pid=pid_val if isinstance(pid_val, int) and not isinstance(pid_val, bool) else None,
                     ret=ret_val if isinstance(ret_val, int) and not isinstance(ret_val, bool) else None,
                     errno_name=err_name if isinstance(err_name, str) and err_name else None,
                     classification=classification,
@@ -402,6 +405,9 @@ def _find_kernel_witness(
     op: str,
     target: str,
     expected_outcome: str | None,
+    *,
+    probe_pid: int | None = None,
+    used_event_lines: set[int] | None = None,
 ) -> SecpolEvent | None:
     """Correlate a matching `SECPOLEV_JSON:` event for `(origin, op, target)`."""
     want_verdict = (
@@ -411,6 +417,10 @@ def _find_kernel_witness(
     )
 
     for ev in events:
+        if used_event_lines is not None and ev.line in used_event_lines:
+            continue
+        if probe_pid is not None and ev.pid is not None and ev.pid != probe_pid:
+            continue
         if ev.type != origin:
             continue
         if want_verdict is not None and ev.verdict != want_verdict:
@@ -731,6 +741,7 @@ def analyze_blast(
     unobservable_count = 0
     mismatch_count = 0
     inconclusive_count = 0
+    used_witness_lines: set[int] = set()
     for kp in scoped_kprobes:
         if kp.op == "allow_attach" and kp.classification in ("INCONCLUSIVE", "SETUP_FAILURE"):
             inconclusive_count += 1
@@ -740,8 +751,17 @@ def analyze_blast(
             )
             if static_pred != kp.outcome:
                 mismatch_count += 1
-        witness = _find_kernel_witness(secpolev_events, kp.origin, kp.op, kp.target, kp.outcome)
+        witness = _find_kernel_witness(
+            secpolev_events,
+            kp.origin,
+            kp.op,
+            kp.target,
+            kp.outcome,
+            probe_pid=kp.pid,
+            used_event_lines=used_witness_lines,
+        )
         if witness is not None:
+            used_witness_lines.add(witness.line)
             correlated_count += 1
         else:
             unobservable_count += 1
