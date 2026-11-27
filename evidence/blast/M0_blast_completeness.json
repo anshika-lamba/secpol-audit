@@ -1,0 +1,14 @@
+{
+  "target": "QNX Neutrino 8.0 \u00b7 QEMU x86_64 TCG",
+  "execution": "independent-verification-boot",
+  "policy_path": "qnx_demo/mutants/M0_sentry_clean.secpol",
+  "policy_hash": "77c9b135166491777ed1e179c1f1f87950d5d47c3d7857489b818550b3df8a10",
+  "log_path": "qnx_demo/build/blast/M0_blast_clean.log",
+  "probes_total": 12,
+  "probes_completed": 12,
+  "kernel_events_correlated": 9,
+  "unobservable_operations": 3,
+  "dropped_events": 0,
+  "mismatches": 0,
+  "result": "COMPLETE"
+}
