@@ -211,11 +211,12 @@ def test_real_qnx8_m0_sentry_clean_log_passes_with_zero_findings(capsys) -> None
     parsed = parse_events_file(real_m0_log)
     res = correlate_events(parsed, pol, ifs=ifs)
 
-    assert len(parsed.events) == 222
+    assert len(parsed.events) == 281
+    assert parsed.alerts == []
     assert parsed.stats.dropped == 0
     assert res.findings == []
     assert res.verified_edges == []
-    assert len(res.custom_perm_grants) == 1
+    assert len(res.custom_perm_grants) == 6
     assert len(res.custom_perm_denials) == 1
 
     rc = main(
@@ -246,7 +247,8 @@ def test_real_qnx8_m3_sentry_escalate_log_confirms_2hop_chain(capsys, tmp_path: 
     parsed = parse_events_file(real_m3_log)
     res = correlate_events(parsed, pol, ifs=ifs)
 
-    assert len(parsed.events) == 270
+    assert len(parsed.events) == 329
+    assert len(parsed.alerts) == 1
     assert parsed.stats.dropped == 0
     assert ("ivi_ui_t", "diag_helper_t") in res.verified_edges
     assert ("diag_helper_t", "can_hal_t") in res.verified_edges

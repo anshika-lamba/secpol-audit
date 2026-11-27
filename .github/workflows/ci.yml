@@ -147,3 +147,13 @@ jobs:
           print("secpol-audit fix smoke-test passed (0 escalation chains verified)")
           PY
 
+      - name: Lock real stock QNX 8.0 secpolgenerate policy into parser & check
+        run: |
+          set +e
+          secpol-audit check evidence/secpolgenerate/qnx8_generated.secpol
+          rc=$?
+          set -e
+          test "$rc" -ne 2
+          echo "qnx8_generated.secpol parsed with 0 parse errors (exit=$rc)"
+
+

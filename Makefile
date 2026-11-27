@@ -2,8 +2,9 @@ PYTHON ?= python3
 PYTEST ?= pytest
 MUTANTS := M0_clean M1_no_connect M2_untyped_server M3_2hop_escalate M3_fixed
 SENTRY_MUTANTS := M0_sentry_clean M3_sentry_escalate
+BLAST_MUTANTS := M0_blast_clean M3_blast_escalate
 
-.PHONY: test demo-report verify-offline verify-fixtures qemu-mutants sentry-binaries sentry-images qemu-sentry secpolgen-image qemu-secpolgen clean
+.PHONY: test demo-report verify-offline verify-fixtures qemu-mutants sentry-binaries sentry-images qemu-sentry blast-binaries blast-images qemu-blast secpolgen-image qemu-secpolgen clean
 
 test:
 	$(PYTEST) -v
@@ -42,6 +43,20 @@ qemu-sentry:
 	@for m in $(SENTRY_MUTANTS); do \
 		echo "=== Running QEMU x86_64 TCG for sentry mutant $$m ==="; \
 		bash harness/run_qemu.sh qnx_demo/build/$$m.ifs evidence/qemu_logs/$$m.log 60; \
+	done
+
+blast-binaries:
+	$(MAKE) -C qnx_demo blast-binaries
+
+blast-images:
+	$(MAKE) -C qnx_demo blast-images
+
+qemu-blast:
+	$(MAKE) -C qnx_demo blast-binaries blast-images
+	@mkdir -p qnx_demo/build/blast
+	@for m in $(BLAST_MUTANTS); do \
+		echo "=== Running QEMU x86_64 TCG for blast verification $$m ==="; \
+		bash harness/run_qemu.sh qnx_demo/build/$$m.ifs qnx_demo/build/blast/$$m.log 60; \
 	done
 
 secpolgen-image:

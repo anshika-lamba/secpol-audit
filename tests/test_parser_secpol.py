@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from secpol_audit.ir import ParseDiagnostic
@@ -362,5 +364,35 @@ def test_custom_class_and_gain_priv_fail_closed_validation() -> None:
     with pytest.raises(ParseDiagnostic) as exc6:
         parse_secpol_text("unknown_directive foo;\n", "bad_kw.secpol")
     assert exc6.value.code == "UNSUPPORTED_CONSTRUCT"
+
+
+def test_real_stock_qnx8_secpolgenerate_policy_parses_with_zero_errors() -> None:
+    repo_root = Path(__file__).resolve().parent.parent
+    gen_path = repo_root / "evidence/secpolgenerate/qnx8_generated.secpol"
+    assert gen_path.is_file(), "Real stock QNX 8.0 qnx8_generated.secpol must exist"
+
+    ir = parse_secpol_file(gen_path)
+    assert {"can_hal_t", "pipe_t", "pipe_t__run", "random_t", "slogger2_t", "slogger2_t__run"}.issubset(
+        set(ir.types.keys())
+    )
+    # Verify empty `allow default_rules self:ability {};` parsed cleanly
+    assert any(r.sources == ("default_rules",) and r.abilities == () for r in ir.ability_rules)
+    # Verify braced `allow_attach pipe_t { pipe:/ /dev/pipe };`
+    pipe_attaches = [ap for r in ir.attach_rules if "pipe_t" in r.types for ap in r.paths]
+    assert any(ap.ftype == "pipe" and ap.path == "/" for ap in pipe_attaches)
+    assert any(ap.path == "/dev/pipe" for ap in pipe_attaches)
+    # Verify `derive_type <src> run <dst>;` rules parsed cleanly
+    derive_triples = {(d.src_type, d.name, d.dst_type) for d in ir.derive_rules}
+    assert ("pipe_t", "run", "pipe_t__run") in derive_triples
+    assert ("slogger2_t", "run", "slogger2_t__run") in derive_triples
+    # Verify `channel_connect:slogger2_t` inside `random_t self:ability`
+    random_abilities = [
+        (s.name, s.args)
+        for r in ir.ability_rules
+        if "random_t" in r.sources
+        for s in r.abilities
+    ]
+    assert ("channel_connect", ("slogger2_t",)) in random_abilities
+
 
 
