@@ -27,6 +27,7 @@ SECPOLEV_ALERT_PREFIX = "SECPOLEV_ALERT:"
 SECPOLEV_STATS_RE = re.compile(
     r"SECPOLEV_STATS:\s*ok=(\d+)\s+denied=(\d+)\s+dropped=(\d+)\b"
 )
+LINEAGE_HOP_RE = re.compile(r"\bLINEAGE_HOP([12]):(\{.*\})")
 SENTRY_READ_AUTH_RE = re.compile(r"\b(SENTRY_(?:READ|CLIENT\d+)_AUTH)=(OK|DENIED)\b")
 SENTRY_READ_UNAUTH_RE = re.compile(r"\bSENTRY_READ_UNAUTH=(OK|DENIED)\b")
 
@@ -112,6 +113,33 @@ class SecpolStats:
         }
 
 
+@dataclass(frozen=True)
+class LineageHop:
+    """Parsed `LINEAGE_HOP1:` / `LINEAGE_HOP2:` exploit lineage marker."""
+
+    hop: int
+    parent_pid: int
+    child_pid: int
+    origin_type: str
+    requested_target_type: str
+    outcome: str  # "OK" | "DENIED"
+    errno: int
+    line: int = 1
+    raw: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "hop": self.hop,
+            "parent_pid": self.parent_pid,
+            "child_pid": self.child_pid,
+            "origin_type": self.origin_type,
+            "requested_target_type": self.requested_target_type,
+            "outcome": self.outcome,
+            "errno": self.errno,
+            "line": self.line,
+        }
+
+
 @dataclass
 class ParsedEventLog:
     """Complete parsed `libsecpolev` telemetry log."""
@@ -120,6 +148,7 @@ class ParsedEventLog:
     is_synthetic_fixture: bool = False
     events: list[SecpolEvent] = field(default_factory=list)
     alerts: list[SecpolAlert] = field(default_factory=list)
+    lineage_hops: list[LineageHop] = field(default_factory=list)
     stats: SecpolStats | None = None
     sentry_read_auth: str | None = None
     sentry_read_unauth: str | None = None
@@ -186,6 +215,29 @@ def parse_events_text(text: str, source_path: str = "<memory>") -> ParsedEventLo
         m_unauth = SENTRY_READ_UNAUTH_RE.search(line)
         if m_unauth:
             parsed.sentry_read_unauth = m_unauth.group(1)
+
+        m_lin = LINEAGE_HOP_RE.search(line)
+        if m_lin:
+            hop_num = int(m_lin.group(1))
+            span = SourceSpan(file=source_path, line=line_no, col=m_lin.start() + 1, snippet=line)
+            try:
+                lobj = json.loads(m_lin.group(2))
+            except json.JSONDecodeError as exc:
+                raise ParseDiagnostic("PARSE_ERROR", f"Malformed LINEAGE_HOP{hop_num} JSON: {exc.msg}", span) from exc
+            if isinstance(lobj, dict):
+                parsed.lineage_hops.append(
+                    LineageHop(
+                        hop=hop_num,
+                        parent_pid=int(lobj.get("parent_pid", -1)),
+                        child_pid=int(lobj.get("child_pid", -1)),
+                        origin_type=str(lobj.get("origin_type") or ""),
+                        requested_target_type=str(lobj.get("requested_target_type") or ""),
+                        outcome=str(lobj.get("outcome") or ""),
+                        errno=int(lobj.get("errno", 0)),
+                        line=line_no,
+                        raw=line,
+                    )
+                )
 
         if SECPOLEV_JSON_PREFIX in line:
             idx = line.find(SECPOLEV_JSON_PREFIX)
@@ -485,13 +537,49 @@ def correlate_events(
         if e.src != e.dst:
             esc_out_counts[e.src] = esc_out_counts.get(e.src, 0) + 1
 
-    # Identify static escalation edges verified by kernel trace
+    # Identify static escalation edges verified by kernel trace:
+    # 1. Strict PID-aware correlation from LINEAGE_HOP1/2 markers + SECPOLEV_JSON
     verified_edges_set: set[tuple[str, str]] = set()
     verified_edge_evidence: dict[tuple[str, str], SecpolEvent] = {}
+    pid_verified_hops: dict[tuple[str, str], tuple[LineageHop, SecpolEvent, SecpolEvent]] = {}
+
+    for hop in log.lineage_hops:
+        ev1_matches = [
+            ev
+            for ev in log.events
+            if ev.pid == hop.parent_pid
+            and ev.type == hop.origin_type
+            and ev.kind == "ability"
+            and ev.ability == "settypeid"
+            and ev.verdict == hop.outcome
+        ]
+        if not ev1_matches:
+            continue
+        ev1 = min(ev1_matches, key=lambda x: (x.ts_ns, x.line))
+        if hop.outcome == "OK":
+            ev2_matches = [
+                ev
+                for ev in log.events
+                if ev.ts_ns >= ev1.ts_ns
+                and ev.pid == hop.child_pid
+                and ev.type == hop.requested_target_type
+            ]
+            if not ev2_matches:
+                continue
+            ev2 = min(ev2_matches, key=lambda x: (x.ts_ns, x.line))
+            pair = (hop.origin_type, hop.requested_target_type)
+            if pair in static_esc_pairs:
+                verified_edges_set.add(pair)
+                verified_edge_evidence[pair] = ev1
+                pid_verified_hops[pair] = (hop, ev1, ev2)
+
+    # 2. Legacy alert-based edges (when no lineage_hops are present)
     for e in path_result.escalation_edges:
         if e.src == e.dst:
             continue
         pair = (e.src, e.dst)
+        if pair in verified_edges_set:
+            continue
         src_events = settypeid_ok_by_type.get(e.src, [])
         if not src_events:
             continue
@@ -508,6 +596,16 @@ def correlate_events(
     for ep in path_result.escalation_paths:
         ep_pairs = [(ep.nodes[i], ep.nodes[i + 1]) for i in range(len(ep.nodes) - 1)]
         all_hops_verified = bool(ep_pairs) and all(p in verified_edges_set for p in ep_pairs)
+        # If PID-verified hops are present for this chain, enforce causal PID linkage
+        if all_hops_verified and len(ep_pairs) >= 2 and all(p in pid_verified_hops for p in ep_pairs):
+            causal_ok = True
+            for i in range(len(ep_pairs) - 1):
+                h_prev, ev1_prev, _ = pid_verified_hops[ep_pairs[i]]
+                h_next, ev1_next, _ = pid_verified_hops[ep_pairs[i + 1]]
+                if h_next.parent_pid != h_prev.child_pid or ev1_next.ts_ns < ev1_prev.ts_ns:
+                    causal_ok = False
+                    break
+            all_hops_verified = causal_ok
         matching_alert = next(
             (a for a, tc in valid_alerts if tc == ep.nodes),
             None,

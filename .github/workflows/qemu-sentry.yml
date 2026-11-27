@@ -55,20 +55,40 @@ jobs:
         run: |
           source /tmp/qnx800/qnxsdp-env.sh
           make qemu-blast
-          if [ -f qnx_demo/build/blast/M0_blast_clean.log ]; then
-            secpol-audit blast qnx_demo/mutants/M0_sentry_clean.secpol \
-              --ifs qnx_demo/build_blast.ifs.in \
-              --log qnx_demo/build/blast/M0_blast_clean.log \
-              --completeness-out qnx_demo/build/blast/M0_blast_completeness.json \
-              --html qnx_demo/build/blast/M0_blast_explorer.html || true
-          fi
-          if [ -f qnx_demo/build/blast/M3_blast_escalate.log ]; then
-            secpol-audit blast qnx_demo/mutants/M3_sentry_escalate.secpol \
-              --ifs qnx_demo/build_blast.ifs.in \
-              --log qnx_demo/build/blast/M3_blast_escalate.log \
-              --completeness-out qnx_demo/build/blast/M3_blast_completeness.json \
-              --html qnx_demo/build/blast/M3_blast_explorer.html || true
-          fi
+          set +e
+          secpol-audit blast qnx_demo/mutants/M0_blast_clean.secpol \
+            --ifs qnx_demo/build_blast.ifs.in \
+            --log qnx_demo/build/blast/M0_blast_clean.log \
+            --completeness-out qnx_demo/build/blast/M0_blast_completeness.json \
+            --html qnx_demo/build/blast/M0_blast_explorer.html
+          RC_M0=$?
+          secpol-audit blast qnx_demo/mutants/M3_blast_escalate.secpol \
+            --ifs qnx_demo/build_blast.ifs.in \
+            --log qnx_demo/build/blast/M3_blast_escalate.log \
+            --completeness-out qnx_demo/build/blast/M3_blast_completeness.json \
+            --html qnx_demo/build/blast/M3_blast_explorer.html
+          RC_M3=$?
+          set -e
+          [ "$RC_M0" -eq 0 ] || { echo "Expected exit 0 for M0_blast_clean, got $RC_M0"; exit 1; }
+          [ "$RC_M3" -eq 1 ] || { echo "Expected exit 1 for M3_blast_escalate, got $RC_M3"; exit 1; }
+          for f in \
+            qnx_demo/build/blast/M0_blast_clean.log \
+            qnx_demo/build/blast/M3_blast_escalate.log \
+            qnx_demo/build/blast/M0_blast_completeness.json \
+            qnx_demo/build/blast/M3_blast_completeness.json \
+            qnx_demo/build/blast/M0_blast_explorer.html \
+            qnx_demo/build/blast/M3_blast_explorer.html; do
+            test -s "$f" || { echo "Missing or empty artifact: $f"; exit 1; }
+          done
+          python3 -c '
+import json, sys
+for p in ("qnx_demo/build/blast/M0_blast_completeness.json", "qnx_demo/build/blast/M3_blast_completeness.json"):
+    d = json.load(open(p))
+    assert d["result"] == "COMPLETE", f"{p}: result={d[\"result\"]}"
+    assert d["mismatches"] == 0, f"{p}: mismatches={d[\"mismatches\"]}"
+    assert d["dropped_events"] == 0, f"{p}: dropped_events={d[\"dropped_events\"]}"
+print("All blast completeness checks PASSED")
+'
 
       - name: Build secpolgen_capture.ifs and boot stock QNX 8.0 secpolgenerate capture
         shell: bash
@@ -93,12 +113,14 @@ jobs:
               cat "$f"
             fi
           done
-          if [ -f evidence/qemu_logs/M3_sentry_escalate.log ]; then
-            secpol-audit verify-events qnx_demo/mutants/M3_sentry_escalate.secpol --log evidence/qemu_logs/M3_sentry_escalate.log || true
-          fi
-          if [ -f evidence/qemu_logs/M0_sentry_clean.log ]; then
-            secpol-audit verify-events qnx_demo/mutants/M0_sentry_clean.secpol --log evidence/qemu_logs/M0_sentry_clean.log || true
-          fi
+          set +e
+          secpol-audit verify-events qnx_demo/mutants/M3_sentry_escalate.secpol --log evidence/qemu_logs/M3_sentry_escalate.log
+          RC_EV_M3=$?
+          secpol-audit verify-events qnx_demo/mutants/M0_sentry_clean.secpol --log evidence/qemu_logs/M0_sentry_clean.log
+          RC_EV_M0=$?
+          set -e
+          [ "$RC_EV_M3" -eq 1 ] || { echo "Expected exit 1 for M3_sentry_escalate verify-events, got $RC_EV_M3"; exit 1; }
+          [ "$RC_EV_M0" -eq 0 ] || { echo "Expected exit 0 for M0_sentry_clean verify-events, got $RC_EV_M0"; exit 1; }
 
       - name: Upload real QNX 8.0 sentry logs
         if: always()

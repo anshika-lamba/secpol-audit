@@ -9,7 +9,7 @@
     reopen /dev/text
 
     display_msg "=== SECPOLGEN_CAPTURE_BEGIN ==="
-    secpolgenerate -u -t 50 &
+    secpolgenerate -N -u -t 50 &
     waitfor /dev/secpolgenerate/policy 5
     secpolpush
 
@@ -19,7 +19,7 @@
     on -T pipe_t /proc/boot/pipe &
     waitfor /dev/pipe 3
 
-    on -T random_t /proc/boot/random &
+    on -T random_t /proc/boot/random -t &
     waitfor /dev/random 3
 
     on -T can_hal_t /proc/boot/can_server &

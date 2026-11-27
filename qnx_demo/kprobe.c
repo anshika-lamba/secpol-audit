@@ -107,11 +107,12 @@ static void emit_kprobe_json(
 
     printf(
         "KPROBE_JSON:{\"origin\":\"%s\",\"op\":\"%s\",\"target\":\"%s\","
-        "\"path\":\"%s\",\"ret\":%d,\"outcome\":\"%s\",\"errno\":%d,\"errno_name\":\"%s\"}\n",
+        "\"path\":\"%s\",\"pid\":%d,\"ret\":%d,\"outcome\":\"%s\",\"errno\":%d,\"errno_name\":\"%s\"}\n",
         origin_esc,
         op_esc,
         target_esc,
         path_esc,
+        (int)getpid(),
         ret,
         allowed ? "ALLOW" : "DENY",
         effective_errno,

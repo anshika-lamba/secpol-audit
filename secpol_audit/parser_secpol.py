@@ -929,21 +929,34 @@ class SecpolParser:
 
     def _parse_derive_type(self, ir: PolicyIR) -> None:
         start = self.advance()  # 'derive_type'
-        src_tok = self.expect("WORD", "source type in derive_type")
-        src = self._validate_ident(src_tok, "source type", allow_reserved=True)
-        name_tok = self.expect("WORD", "transition name in derive_type")
+        srcs = self._parse_ident_or_set("source type in derive_type")
+        if self.peek().kind == "LBRACE":
+            self.advance()
+            names_list: list[str] = []
+            while self.peek().kind != "RBRACE":
+                if self.peek().kind == "EOF":
+                    raise self.error("PARSE_ERROR", "Unterminated '{' in derive_type", self.peek())
+                names_list.append(self.expect("WORD", "transition name in derive_type").value)
+            self.expect("RBRACE", "'}'")
+            names = tuple(names_list)
+        else:
+            names = (self.expect("WORD", "transition name in derive_type").value,)
         dst_tok = self.expect("WORD", "destination type in derive_type")
         dst = self._validate_ident(dst_tok, "destination type", allow_reserved=True)
         end = self.expect("SEMI", "';'")
-        ir.derive_rules.append(
-            DeriveTypeRule(
-                src_type=src,
-                name=name_tok.value,
-                dst_type=dst,
-                span=self.span_of(start, end),
-                raw=self.raw_slice(start, end),
-            )
-        )
+        span = self.span_of(start, end)
+        raw = self.raw_slice(start, end)
+        for src in srcs:
+            for name in names:
+                ir.derive_rules.append(
+                    DeriveTypeRule(
+                        src_type=src,
+                        name=name,
+                        dst_type=dst,
+                        span=span,
+                        raw=raw,
+                    )
+                )
 
     def _parse_default_spawn_type(self, ir: PolicyIR) -> None:
         start = self.advance()  # 'default_spawn_type'
