@@ -112,7 +112,12 @@ def _check_agreement(
         parts.append("pidin=UNTYPED")
     observed_str = ", ".join(parts) or "no telemetry"
 
-    agrees = (observed_escalation == expects_escalation) and (observed_untyped == expects_untyped)
+    agrees = (
+        (observed_escalation == expects_escalation)
+        and (observed_untyped == expects_untyped)
+        and bool(obs.completed)
+        and (obs.mutant == spec.name)
+    )
     return observed_str, agrees
 
 
@@ -130,9 +135,12 @@ def run_verification(log_dir: Path, *, allow_missing: bool = False) -> int:
         log_file = log_dir / spec.log_filename
         if not log_file.is_file():
             any_missing = True
-            print(f"{spec.name:<20} | {pred_text:<42} | {'(no QEMU log present)':<28} | SKIPPED")
+            if not allow_missing:
+                all_ok = False
+            print(f"{spec.name:<20} | {pred_text:<42} | {'(no QEMU log present)':<28} | {'SKIPPED' if allow_missing else 'MISSING'}")
             continue
 
+        raw_text = log_file.read_text(encoding="utf-8", errors="replace")
         obs = observe_serial_file(log_file)
         obs_text, agrees = _check_agreement(
             spec,
@@ -140,6 +148,21 @@ def run_verification(log_dir: Path, *, allow_missing: bool = False) -> int:
             expects_escalation=exp_esc,
             expects_untyped=exp_untyped,
         )
+        # Fail closed on nonzero dropped events or INCONCLUSIVE/EEXIST probes if present
+        if "SECPOLEV_STATS:" in raw_text or "KPROBE_JSON:" in raw_text:
+            from secpol_audit.blast import parse_blast_log_text
+            try:
+                kps, pev = parse_blast_log_text(raw_text, str(log_file))
+                if pev and pev.stats and pev.stats.dropped > 0:
+                    agrees = False
+                    obs_text += f", dropped={pev.stats.dropped}"
+                if any(kp.classification in ("INCONCLUSIVE", "SETUP_FAILURE") for kp in kps):
+                    agrees = False
+                    obs_text += ", INCONCLUSIVE"
+            except Exception:
+                agrees = False
+                obs_text += ", PARSE_ERROR"
+
         suffix = " (fixture)" if obs.is_synthetic_fixture else ""
         status = f"MATCH{suffix}" if agrees else f"MISMATCH{suffix}"
         if not agrees:
@@ -155,7 +178,7 @@ def run_verification(log_dir: Path, *, allow_missing: bool = False) -> int:
             "        python3 harness/verify_offline.py --fixtures"
         )
         if not allow_missing:
-            return 0
+            return 1
     return 0 if all_ok else 1
 
 
@@ -174,9 +197,14 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Replay clearly labeled synthetic unit-test fixtures from tests/fixtures/sample_qemu_logs/",
     )
+    parser.add_argument(
+        "--allow-missing",
+        action="store_true",
+        help="Allow missing log files without failing closed",
+    )
     args = parser.parse_args(argv)
     target_dir = (REPO_ROOT / "tests/fixtures/sample_qemu_logs") if args.fixtures else args.log_dir
-    return run_verification(target_dir, allow_missing=not args.fixtures)
+    return run_verification(target_dir, allow_missing=args.allow_missing)
 
 
 if __name__ == "__main__":

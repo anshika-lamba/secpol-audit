@@ -51,11 +51,18 @@ timeout --foreground "${TIMEOUT_SEC}" \
         -kernel "$IFS_IMAGE" \
     | tee "$OUTPUT_LOG" \
     | awk '/=== SECPOL_AUDIT_DONE ===/ { print; fflush(); exit 0 } { print; fflush() }'
-RC=$?
+PIPE_RCS=("${PIPESTATUS[@]}")
 set -e
 
-if [ "$RC" -eq 124 ]; then
-    echo "[run_qemu.sh] Reached timeout (${TIMEOUT_SEC}s); partial serial log saved to $OUTPUT_LOG" >&2
+QEMU_RC="${PIPE_RCS[0]:-1}"
+if [ "$QEMU_RC" -eq 124 ]; then
+    echo "[run_qemu.sh] ERROR: Reached timeout (${TIMEOUT_SEC}s) before completion marker; partial serial log saved to $OUTPUT_LOG" >&2
+    exit 124
+fi
+
+if ! grep -q "=== SECPOL_AUDIT_DONE ===" "$OUTPUT_LOG"; then
+    echo "[run_qemu.sh] ERROR: Completion marker '=== SECPOL_AUDIT_DONE ===' missing from $OUTPUT_LOG (QEMU rc=$QEMU_RC)" >&2
+    exit 1
 fi
 
 echo "[run_qemu.sh] Done. Log written to $OUTPUT_LOG"
