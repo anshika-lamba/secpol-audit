@@ -43,6 +43,7 @@ class SecpolEvent:
     proc: str
     type: str
     kind: str  # "ability" | "attach" | "link" | "custom"
+    pid: int | None = None
     ability: str = ""
     root: bool = False
     range: tuple[int, int] | None = None
@@ -57,6 +58,7 @@ class SecpolEvent:
     def to_dict(self) -> dict[str, Any]:
         return {
             "ts_ns": self.ts_ns,
+            "pid": self.pid,
             "verdict": self.verdict,
             "proc": self.proc,
             "type": self.type,
@@ -241,6 +243,14 @@ def parse_events_text(text: str, source_path: str = "<memory>") -> ParsedEventLo
                     )
                 rng_val = (rng_raw[0], rng_raw[1])
 
+            raw_pid = obj.get("pid")
+            if raw_pid is not None and (not isinstance(raw_pid, int) or isinstance(raw_pid, bool)):
+                raise ParseDiagnostic(
+                    "PARSE_ERROR",
+                    f"Invalid SECPOLEV_JSON pid '{raw_pid}' (expected integer)",
+                    span,
+                )
+
             parsed.events.append(
                 SecpolEvent(
                     ts_ns=ts_ns,
@@ -248,6 +258,7 @@ def parse_events_text(text: str, source_path: str = "<memory>") -> ParsedEventLo
                     proc=str(obj.get("proc") or ""),
                     type=str(obj.get("type") or ""),
                     kind=kind,
+                    pid=raw_pid,
                     ability=str(obj.get("ability") or ""),
                     root=bool(obj.get("root", False)),
                     range=rng_val,
@@ -485,10 +496,7 @@ def correlate_events(
         if not src_events:
             continue
         earliest_ev = min(src_events, key=lambda x: (x.ts_ns, x.line))
-        dst_appeared_after = (
-            e.dst in type_latest_ts and type_latest_ts[e.dst] >= earliest_ev.ts_ns
-        )
-        if pair in alert_edge_pairs or dst_appeared_after or esc_out_counts.get(e.src, 0) == 1:
+        if pair in alert_edge_pairs:
             verified_edges_set.add(pair)
             verified_edge_evidence[pair] = earliest_ev
 

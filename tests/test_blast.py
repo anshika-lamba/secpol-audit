@@ -290,3 +290,36 @@ def test_cli_blast_and_blast_diff_end_to_end(tmp_path: Path) -> None:
         "nonexistent_type_t",
     ])
     assert rc_bad_origin == 2
+
+
+def test_allow_attach_five_way_errno_classification_and_completeness_gating() -> None:
+    from secpol_audit.blast import classify_allow_attach_errno
+
+    assert classify_allow_attach_errno(0, 0, "ALLOW") == ("ALLOW", None)
+    assert classify_allow_attach_errno(-1, 13, "DENY") == ("DENY_POLICY", None)
+    assert classify_allow_attach_errno(-1, 1, "DENY") == ("DENY_ABILITY", None)
+    assert classify_allow_attach_errno(-1, 17, "DENY") == ("INCONCLUSIVE", "PATH_COLLISION")
+    assert classify_allow_attach_errno(-1, 2, "DENY") == ("SETUP_FAILURE", "INCONCLUSIVE")
+
+    policy = parse_secpol_file(M3_SECPOL)
+
+    # EEXIST (17) -> INCONCLUSIVE (PATH_COLLISION) prevents COMPLETE
+    log_eexist = (
+        'KPROBE_JSON:{"origin":"ivi_ui_t","op":"allow_attach","path":"/dev/secpol_probe_deny_ivi_ui_t",'
+        '"target":"/dev/secpol_probe_deny_ivi_ui_t","ret":-1,"outcome":"DENY","errno":17,"errno_name":"EEXIST"}\n'
+        'SECPOLEV_STATS: ok=0 denied=0 dropped=0\n'
+    )
+    rep_eexist = analyze_blast(policy, log_text=log_eexist, log_path="<eexist>")
+    assert rep_eexist.kprobes[0].classification == "INCONCLUSIVE"
+    assert rep_eexist.kprobes[0].classification_reason == "PATH_COLLISION"
+    assert rep_eexist.completeness.result == "PARTIAL"
+
+    # ENOENT (2) -> SETUP_FAILURE prevents COMPLETE
+    log_enoent = (
+        'KPROBE_JSON:{"origin":"ivi_ui_t","op":"allow_attach","path":"/dev/secpol_probe_deny_ivi_ui_t",'
+        '"target":"/dev/secpol_probe_deny_ivi_ui_t","ret":-1,"outcome":"DENY","errno":2,"errno_name":"ENOENT"}\n'
+        'SECPOLEV_STATS: ok=0 denied=0 dropped=0\n'
+    )
+    rep_enoent = analyze_blast(policy, log_text=log_enoent, log_path="<enoent>")
+    assert rep_enoent.kprobes[0].classification == "SETUP_FAILURE"
+    assert rep_enoent.completeness.result == "PARTIAL"
