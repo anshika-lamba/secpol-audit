@@ -1,0 +1,4 @@
+# This represents types and rules that have not been used.  These might want
+# to be removed from the security policy.  Or it might just be that the system
+# has just not been used in a manner that requires the rules.
+

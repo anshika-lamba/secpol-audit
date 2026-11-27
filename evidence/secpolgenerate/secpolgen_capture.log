@@ -1,0 +1,114 @@
+c[?7l[2J[0mSeaBIOS (version 1.17.0-debian-1.17.0-1ubuntu1)
+
+
+iPXE (https://ipxe.org) 00:03.0 CA00 PCI2.10 PnP PMM+1EFC8CA0+1EF08CA0 CA00
+Press Ctrl-B to configure iPXE (PCI 00:03.0)...                                                                               
+
+
+Booting from ROM..
+non UEFI or UEFI+CSM boot
+ACPI table not found (0x4746434d)
+System behaves poorly without PCID support.
+overriding mask for controller 2, vector_base 0
+=== SECPOLGEN_CAPTURE_BEGIN ===
+secpolgenerate: ignoring missing policy file /proc/boot/secpol.bin
+
+random: Random init failed, exiting. [random.c(296)]
+Unable to access "/dev/random" (2)
+=== PIDIN_BEGIN ===
+CAN_SERVER_READY pid=20485 path=/dev/name/local/can_ctrl
+     pid type             name                                                                             
+       1 -                /proc/boot/procnto-smp-instr                                                     
+       2 -                proc/boot/secpolgenerate                                                         
+    4099 slogger2_t__run  proc/boot/slogger2                                                               
+    8196 pipe_t__run      proc/boot/pipe                                                                   
+   20485 can_hal_t        proc/boot/can_server                                                             
+   24582 -                proc/boot/pidin                                                                  
+=== PIDIN_END ===
+=== SECPOLGEN_POLICY_BEGIN ===
+# This represents a policy that should allow a system to perform all the
+# same actions as have been observed since the policy generator has been
+# running.
+
+# There have been one or more uses of secpol_resmgr_attach() that can have
+# permissions set for them in the policy. See the mount_point entries at
+# the end.
+
+# Don't want any default abilities
+type default_rules;
+allow default_rules self:ability {};
+
+type can_hal_t;
+type pipe_t;
+type pipe_t__run;
+type random_t;
+type slogger2_t;
+type slogger2_t__run;
+
+# === Rules for type can_hal_t ============
+allow_attach can_hal_t {
+    /dev/name/local/can_ctrl
+};
+allow can_hal_t self:ability {
+    prot_exec
+    map_fixed
+    public_channel
+};
+
+# === Rules for type pipe_t ============
+allow_attach pipe_t {
+    pipe:/
+    /dev/pipe
+};
+allow pipe_t self:ability {
+    pathspace
+    prot_exec
+    map_fixed
+    public_channel
+    settypeid:pipe_t__run
+};
+derive_type pipe_t run pipe_t__run;
+
+# === Rules for type random_t ============
+allow random_t self:ability {
+    mem_lock
+    prot_exec
+    map_fixed
+    channel_connect:slogger2_t
+};
+
+# === Rules for type slogger2_t ============
+allow_attach slogger2_t {
+    /dev/slog
+    /dev/slog2/notify
+    /dev/slog2/stdout
+    /dev/slog2/stderr
+    /dev/console
+};
+allow slogger2_t self:ability {
+    pathspace
+    prot_exec
+    map_fixed
+    public_channel
+    settypeid:slogger2_t__run
+};
+derive_type slogger2_t run slogger2_t__run;
+
+# === Mount point permission rules ============
+# These represent uses of secpol_resmgr_attach(). By using mount_point
+# rules you can set the permissions used for these mount points.
+# mount_point ... /dev/console;
+=== SECPOLGEN_POLICY_END ===
+=== SECPOLGEN_UNUSED_BEGIN ===
+# This represents types and rules that have not been used.  These might want
+# to be removed from the security policy.  Or it might just be that the system
+# has just not been used in a manner that requires the rules.
+
+=== SECPOLGEN_UNUSED_END ===
+=== SECPOLGEN_ERRORS_BEGIN ===
+# This file represents errors that have been encountered.  These errors might be
+# expected.  Alternatively, some of these rules might need to be added to the
+# security policy.
+
+=== SECPOLGEN_ERRORS_END ===
+=== SECPOL_AUDIT_DONE ===

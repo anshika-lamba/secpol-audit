@@ -1,0 +1,72 @@
+# This represents a policy that should allow a system to perform all the
+# same actions as have been observed since the policy generator has been
+# running.
+
+# There have been one or more uses of secpol_resmgr_attach() that can have
+# permissions set for them in the policy. See the mount_point entries at
+# the end.
+
+# Don't want any default abilities
+type default_rules;
+allow default_rules self:ability {};
+
+type can_hal_t;
+type pipe_t;
+type pipe_t__run;
+type random_t;
+type slogger2_t;
+type slogger2_t__run;
+
+# === Rules for type can_hal_t ============
+allow_attach can_hal_t {
+    /dev/name/local/can_ctrl
+};
+allow can_hal_t self:ability {
+    prot_exec
+    map_fixed
+    public_channel
+};
+
+# === Rules for type pipe_t ============
+allow_attach pipe_t {
+    pipe:/
+    /dev/pipe
+};
+allow pipe_t self:ability {
+    pathspace
+    prot_exec
+    map_fixed
+    public_channel
+    settypeid:pipe_t__run
+};
+derive_type pipe_t run pipe_t__run;
+
+# === Rules for type random_t ============
+allow random_t self:ability {
+    mem_lock
+    prot_exec
+    map_fixed
+    channel_connect:slogger2_t
+};
+
+# === Rules for type slogger2_t ============
+allow_attach slogger2_t {
+    /dev/slog
+    /dev/slog2/notify
+    /dev/slog2/stdout
+    /dev/slog2/stderr
+    /dev/console
+};
+allow slogger2_t self:ability {
+    pathspace
+    prot_exec
+    map_fixed
+    public_channel
+    settypeid:slogger2_t__run
+};
+derive_type slogger2_t run slogger2_t__run;
+
+# === Mount point permission rules ============
+# These represent uses of secpol_resmgr_attach(). By using mount_point
+# rules you can set the permissions used for these mount points.
+# mount_point ... /dev/console;
