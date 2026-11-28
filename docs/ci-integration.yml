@@ -1,0 +1,35 @@
+# Drop-in GitHub Actions workflow for QNX 8.0 Security Policy CI & SARIF Code Scanning
+name: QNX Security Policy Gate
+
+on:
+  pull_request:
+    paths:
+      - "**/*.secpol"
+      - "**/*.ifs"
+      - "**/*.ifs.in"
+
+permissions:
+  security-events: write
+  contents: read
+
+jobs:
+  secpol-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install secpol-audit
+        run: pip install git+https://github.com/anshika-lamba/secpol-audit.git
+      - name: Audit QNX 8.0 security policy & IFS (SARIF 2.1.0)
+        run: |
+          secpol-audit check policy/system.secpol \
+            --ifs bsp/build.ifs \
+            --format sarif \
+            --output secpol-audit.sarif
+      - name: Upload SARIF to GitHub Code Scanning
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: secpol-audit.sarif

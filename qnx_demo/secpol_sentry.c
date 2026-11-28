@@ -669,6 +669,14 @@ int main(int argc, char *argv[]) {
     g_self_coid = message_connect(dpp, MSG_FLAG_SIDE_CHANNEL);
 
     printf("SENTRY_READY pid=%d path=%s\n", (int)getpid(), SENTRY_DEV_PATH);
+    {
+        uint32_t active_policy_id = 0;
+        if (secpol_get_policy_id(&active_policy_id) == 0) {
+            printf("SECPOLEV_POLICY_ID: %" PRIu32 "\n", active_policy_id);
+        } else {
+            printf("SECPOLEV_POLICY_ID: 0 errno=%d\n", errno);
+        }
+    }
     fflush(stdout);
 
     pthread_t collector_tid;

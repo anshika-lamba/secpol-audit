@@ -13,6 +13,7 @@ from secpol_audit.blast import (
     BlastReport,
     analyze_blast,
     diff_blast_reports,
+    generate_expected_probes_manifest,
     load_expected_probes_manifest,
 )
 from secpol_audit.blast_html import render_blast_html
@@ -487,8 +488,26 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_blast.add_argument("--after-policy", help="Optional remediated .secpol policy for Before vs. After HTML toggle")
     p_blast.add_argument("--after-log", help="Optional QEMU serial log for the --after-policy verification boot")
+    p_blast.add_argument(
+        "--expected-policy-id",
+        type=int,
+        default=None,
+        help="Optional expected QNX 8.0 kernel policy ID (from secpol_get_policy_id) required for COMPLETE",
+    )
     p_blast.add_argument("--output", "-o", help="Write output to file instead of stdout")
     p_blast.set_defaults(func=_cmd_blast)
+
+    # generate-probes
+    p_gen = sub.add_parser(
+        "generate-probes",
+        help="Auto-generate expected-probe manifest JSON and QNX IFS kprobe commands for any .secpol policy",
+    )
+    p_gen.add_argument("secpol", help="Path to QNX 8.0 .secpol policy file")
+    p_gen.add_argument("--ifs", help="Optional path to matching QNX 8.0 build.ifs file")
+    p_gen.add_argument("--origins", help="Optional comma-separated list of origin types to probe")
+    p_gen.add_argument("--out-manifest", help="Write generated JSON manifest to this path")
+    p_gen.add_argument("--out-ifs-snippet", help="Write generated QNX IFS kprobe launch lines to this path")
+    p_gen.set_defaults(func=_cmd_generate_probes)
 
     # blast-diff
     p_bdiff = sub.add_parser(
@@ -726,6 +745,7 @@ def _cmd_blast(args: argparse.Namespace) -> int:
         log_path=log_path_str,
         origin_filter=args.origin,
         expected_probe_specs=expected_probe_specs,
+        expected_policy_id=getattr(args, "expected_policy_id", None),
     )
 
     after_report: BlastReport | None = None
@@ -783,6 +803,44 @@ def _cmd_blast(args: argparse.Namespace) -> int:
         return 0
     if any(v.reachable_sinks for v in report.origins.values()):
         return 1
+    return 0
+
+
+def _cmd_generate_probes(args: argparse.Namespace) -> int:
+    policy_path = Path(args.secpol)
+    if not policy_path.is_file():
+        sys.stderr.write(f"ERROR: policy file not found: {policy_path}\n")
+        return 2
+    ifs = None
+    if args.ifs:
+        ifs_path = Path(args.ifs)
+        if not ifs_path.is_file():
+            sys.stderr.write(f"ERROR: IFS file not found: {ifs_path}\n")
+            return 2
+        ifs = parse_ifs_file(ifs_path)
+
+    policy = parse_secpol_file(policy_path)
+    origins = [o.strip() for o in args.origins.split(",") if o.strip()] if args.origins else None
+    manifest, ifs_lines = generate_expected_probes_manifest(policy, ifs=ifs, origins=origins)
+
+    manifest_text = json.dumps(manifest, indent=2) + "\n"
+    snippet_text = "\n".join(ifs_lines) + "\n"
+
+    if args.out_manifest:
+        mp = Path(args.out_manifest)
+        mp.parent.mkdir(parents=True, exist_ok=True)
+        mp.write_text(manifest_text, encoding="utf-8")
+    if args.out_ifs_snippet:
+        sp = Path(args.out_ifs_snippet)
+        sp.parent.mkdir(parents=True, exist_ok=True)
+        sp.write_text(snippet_text, encoding="utf-8")
+
+    if not args.out_manifest and not args.out_ifs_snippet:
+        sys.stdout.write(manifest_text)
+    else:
+        sys.stdout.write(
+            f"Generated {len(manifest['probes'])} probes for {policy_path}\n"
+        )
     return 0
 
 

@@ -533,16 +533,18 @@ def test_cei2_manifest_rejects_11_and_13_entries(tmp_path: Path) -> None:
     from secpol_audit.blast import load_expected_probes_manifest
     from secpol_audit.ir import ParseDiagnostic
     base = json.loads((Path(__file__).resolve().parent.parent / "qnx_demo" / "blast_expected_probes.json").read_text(encoding="utf-8"))
+    ifs = parse_ifs_file(BLAST_IFS)
+    pol = parse_secpol_file(M3_BLAST_SECPOL)
+    m11 = dict(base, probes=base["probes"][:11])
     p11 = tmp_path / "m11.json"
-    p11.write_text(json.dumps({"version": "1.0", "probes": base["probes"][:11]}), encoding="utf-8")
+    p11.write_text(json.dumps(m11), encoding="utf-8")
     with pytest.raises(ParseDiagnostic):
-        load_expected_probes_manifest(p11)
-
-    p13 = tmp_path / "m13.json"
-    extra = dict(base["probes"][0], id="p13", target="extra_t")
-    p13.write_text(json.dumps({"version": "1.0", "probes": base["probes"] + [extra]}), encoding="utf-8")
+        load_expected_probes_manifest(p11, policy=pol, ifs=ifs)
+    m0 = dict(base, probes=[])
+    p0 = tmp_path / "m0.json"
+    p0.write_text(json.dumps(m0), encoding="utf-8")
     with pytest.raises(ParseDiagnostic):
-        load_expected_probes_manifest(p13)
+        load_expected_probes_manifest(p0)
 
 
 def test_cei3_manifest_rejects_wrong_op_target_kind(tmp_path: Path) -> None:

@@ -189,6 +189,6 @@ def test_makefile_loops_propagate_run_qemu_failure() -> None:
     assert len(run_lines) >= 4
     # Every loop invocation (lines with $$m) must propagate failure via || exit $$?
     loop_lines = [ln for ln in run_lines if "$$m" in ln]
-    assert len(loop_lines) == 3
+    assert len(loop_lines) == 4
     for ln in loop_lines:
         assert "|| exit $$?" in ln, f"Missing failure propagation in Makefile line: {ln}"

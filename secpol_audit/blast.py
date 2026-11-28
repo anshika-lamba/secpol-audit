@@ -243,9 +243,10 @@ class EvidenceCompleteness:
     dropped_events: int
     mismatches: int
     result: str  # "COMPLETE" | "PARTIAL" | "MISMATCH"
+    kernel_policy_id: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        d: dict[str, Any] = {
             "target": self.target,
             "execution": self.execution,
             "policy_path": self.policy_path,
@@ -259,6 +260,9 @@ class EvidenceCompleteness:
             "mismatches": self.mismatches,
             "result": self.result,
         }
+        if self.kernel_policy_id is not None:
+            d["kernel_policy_id"] = self.kernel_policy_id
+        return d
 
 
 @dataclass
@@ -439,8 +443,8 @@ def load_expected_probes_manifest(
         raise ParseDiagnostic("PARSE_ERROR", f"Invalid expected-probes manifest '{path}': {exc}", span) from exc
     if not isinstance(data, dict) or (data.get("schema_version") != 1 and data.get("version") != "1.0"):
         raise ParseDiagnostic("PARSE_ERROR", f"Manifest '{path}' must have version '1.0' or schema_version == 1", span)
-    if not isinstance(data.get("probes"), list) or len(data["probes"]) != 12:
-        raise ParseDiagnostic("PARSE_ERROR", f"Manifest '{path}' must contain exactly 12 probes", span)
+    if not isinstance(data.get("probes"), list) or len(data["probes"]) < 1:
+        raise ParseDiagnostic("PARSE_ERROR", f"Manifest '{path}' must contain at least 1 probe", span)
 
     attaches_by_type = collect_type_attaches(policy) if policy is not None else {}
 
@@ -590,7 +594,201 @@ def load_expected_probes_manifest(
             raise ParseDiagnostic("PARSE_ERROR", f"Duplicate manifest probe tuple {tup}", span)
         seen_tuples.add(tup)
         specs.append(tup)
+
+    if ifs is not None:
+        scheduled = extract_ifs_scheduled_probes(ifs)
+        if scheduled:
+            missing_from_manifest = [t for t in scheduled if t not in seen_tuples]
+            if missing_from_manifest:
+                raise ParseDiagnostic(
+                    "PARSE_ERROR",
+                    f"Manifest '{path}' omits {len(missing_from_manifest)} IFS-scheduled kprobe(s): {missing_from_manifest[:3]}",
+                    span,
+                )
     return tuple(specs)
+
+
+def extract_ifs_scheduled_probes(ifs: IfsIR) -> tuple[tuple[str, str, str], ...]:
+    """Extract all `(origin, op, target)` probes scheduled by `kprobe` invocations in an IFS."""
+    scheduled: list[tuple[str, str, str]] = []
+    for cmd in ifs.commands:
+        if cmd.executable != "kprobe":
+            continue
+        toks = cmd.tokens
+        origin: str | None = cmd.on_type
+        settypeid_csv: str | None = None
+        connect_csv: str | None = None
+        attach_csv: str | None = None
+        i = 0
+        while i < len(toks):
+            if toks[i] == "--origin" and i + 1 < len(toks):
+                origin = toks[i + 1]
+                i += 2
+            elif toks[i] == "--settypeid" and i + 1 < len(toks):
+                settypeid_csv = toks[i + 1]
+                i += 2
+            elif toks[i] == "--connect" and i + 1 < len(toks):
+                connect_csv = toks[i + 1]
+                i += 2
+            elif toks[i] == "--attach" and i + 1 < len(toks):
+                attach_csv = toks[i + 1]
+                i += 2
+            else:
+                i += 1
+        if not origin:
+            continue
+        if settypeid_csv:
+            for t in settypeid_csv.split(","):
+                if t.strip():
+                    scheduled.append((origin, "settypeid", t.strip()))
+        if connect_csv:
+            for spec in connect_csv.split(","):
+                ch = spec.split("=", 1)[0].strip()
+                if ch:
+                    scheduled.append((origin, "channel_connect", ch))
+        if attach_csv:
+            for ap in attach_csv.split(","):
+                if ap.strip():
+                    scheduled.append((origin, "allow_attach", ap.strip()))
+    return tuple(scheduled)
+
+
+def _extract_kernel_policy_id(log_text: str) -> int | None:
+    """Extract QNX 8.0 `SECPOLEV_POLICY_ID: <uint32>` emitted by `secpol_get_policy_id()`."""
+    import re
+    pid_re = re.compile(r"^SECPOLEV_POLICY_ID:\s*(\d+)\b")
+    for raw_line in log_text.splitlines():
+        m = pid_re.match(raw_line.rstrip("\r\n"))
+        if m:
+            return int(m.group(1))
+    return None
+
+
+def generate_expected_probes_manifest(
+    policy: PolicyIR,
+    *,
+    ifs: IfsIR | None = None,
+    origins: list[str] | tuple[str, ...] | None = None,
+) -> tuple[dict[str, Any], list[str]]:
+    """Generate a validated expected-probe manifest AND matching QNX IFS `kprobe` lines for any policy."""
+    path_res = analyze_paths(policy, ifs=ifs)
+    attaches_by_type = collect_type_attaches(policy)
+
+    # Identify channel servers (prefer channels with a unique effective type and, if IFS given, a live launch)
+    ifs_launch_types: set[str] = set()
+    if ifs is not None:
+        for cmd in ifs.commands:
+            if cmd.is_on and cmd.on_type and cmd.executable != "kprobe":
+                ifs_launch_types.add(cmd.on_type)
+
+    channel_candidates: list[tuple[str, str]] = []
+    seen_ch: set[str] = set()
+    for tname, alist in sorted(attaches_by_type.items()):
+        for _ft, ap_path, _raw, ct in alist:
+            if not ap_path.startswith("/dev/name/local/"):
+                continue
+            ch_name = ap_path.rsplit("/", 1)[-1]
+            if ch_name == "_tracelog" or ch_name in seen_ch:
+                continue
+            eff_t = ct if ct else tname
+            if ifs is not None and tname not in ifs_launch_types:
+                continue
+            seen_ch.add(ch_name)
+            channel_candidates.append((ch_name, eff_t))
+
+    # Pick origins: explicit list, else non-infrastructure types (preferring escalation sources/sinks)
+    infra = {"secpol_sentry_t", "slogger2_t"}
+    if origins:
+        selected_origins = [o for o in origins if o in policy.types]
+    else:
+        esc_sources = sorted({e.src for e in path_res.escalation_edges if e.src not in infra})
+        other_types = sorted(
+            t for t in policy.types
+            if t not in infra and t not in esc_sources
+            and t not in {eff for _, eff in channel_candidates}
+        )
+        selected_origins = (esc_sources + other_types)[:4]
+        if not selected_origins:
+            selected_origins = sorted(policy.types.keys())[:3]
+
+    # Pick a high-value sink target for negative settypeid probes
+    sinks = sorted(t for t, info in path_res.nodes.items() if info.get("is_sink") and t not in infra)
+    default_sink = sinks[0] if sinks else (sorted(policy.types.keys())[0] if policy.types else "")
+
+    probes: list[dict[str, Any]] = []
+    ifs_lines: list[str] = []
+    pid_counter = 0
+    uid_base = 31
+
+    for idx_o, origin in enumerate(selected_origins):
+        settypeid_targets: list[str] = []
+        # Include any allowed escalation transitions from this origin
+        for e in sorted(path_res.escalation_edges, key=lambda x: x.dst):
+            if e.src == origin and e.dst != origin and e.dst not in settypeid_targets:
+                settypeid_targets.append(e.dst)
+        # Always include at least one denied settypeid target for negative verification
+        for cand in [default_sink] + sorted(policy.types.keys()):
+            if cand and cand != origin and cand not in infra and cand not in settypeid_targets:
+                settypeid_targets.append(cand)
+                if len(settypeid_targets) >= 2:
+                    break
+
+        connect_specs: list[tuple[str, str]] = channel_candidates[:1]
+
+        # Pick an allow_attach path: an explicitly allowed isolated probe path if declared, else negative deny path
+        origin_attaches = [ap for _ft, ap, _r, _ct in attaches_by_type.get(origin, []) if "probe_allow" in ap]
+        attach_path = origin_attaches[0] if origin_attaches else f"/dev/secpol_probe_deny_{origin}"
+
+        for st in settypeid_targets:
+            pid_counter += 1
+            probes.append({
+                "id": f"P{pid_counter:02d}",
+                "origin": origin,
+                "op": "settypeid",
+                "target": st,
+                "target_kind": "type",
+                "resolved_target_type": st,
+                "evidence_requirement": "pid+ability_range",
+            })
+        for ch_name, eff_t in connect_specs:
+            pid_counter += 1
+            probes.append({
+                "id": f"P{pid_counter:02d}",
+                "origin": origin,
+                "op": "channel_connect",
+                "target": ch_name,
+                "target_kind": "channel",
+                "resolved_target_type": eff_t,
+                "evidence_requirement": "pid+server_type_range",
+            })
+        pid_counter += 1
+        probes.append({
+            "id": f"P{pid_counter:02d}",
+            "origin": origin,
+            "op": "allow_attach",
+            "target": attach_path,
+            "target_kind": "path",
+            "resolved_target_type": None,
+            "evidence_requirement": "pid+exact_path",
+        })
+
+        parts = [
+            f"on -T {origin} -u {uid_base + idx_o}:{uid_base + idx_o} /proc/boot/kprobe --origin {origin}"
+        ]
+        if settypeid_targets:
+            parts.append(f"--settypeid {','.join(settypeid_targets)}")
+        if connect_specs:
+            parts.append("--connect " + ",".join(f"{c}={t}" for c, t in connect_specs))
+        parts.append(f"--attach {attach_path}")
+        ifs_lines.append(" ".join(parts))
+
+    manifest = {
+        "schema_version": 1,
+        "version": "1.0",
+        "description": f"Auto-generated {len(probes)}-probe verification matrix for {policy.source_path}",
+        "probes": probes,
+    }
+    return manifest, ifs_lines
 
 
 def _has_valid_post_marker_stats(log_text: str) -> bool:
@@ -714,6 +912,7 @@ def analyze_blast(
     execution_mode: str | None = None,
     expected_probes: int | None = None,
     expected_probe_specs: tuple[tuple[str, str, str], ...] | None = None,
+    expected_policy_id: int | None = None,
 ) -> BlastReport:
     """Build an evidence-aware concentric blast-radius report across all 3 oracles."""
     if origin_filter and origin_filter not in policy.types:
@@ -1049,7 +1248,27 @@ def analyze_blast(
         and _has_valid_post_marker_stats(log_text)
         and len(secpolev_events) == (parsed_events.stats.ok + parsed_events.stats.denied)
     )
-    has_explicit_manifest = active_expected_specs is not None and len(active_expected_specs) == 12
+    ifs_scheduled = extract_ifs_scheduled_probes(ifs) if ifs is not None else ()
+    manifest_covers_ifs = (
+        active_expected_specs is not None
+        and (not ifs_scheduled or set(ifs_scheduled).issubset(set(active_expected_specs)))
+    )
+    has_explicit_manifest = (
+        active_expected_specs is not None
+        and len(active_expected_specs) >= 1
+        and manifest_covers_ifs
+    )
+    kernel_policy_id = _extract_kernel_policy_id(log_text) if log_text is not None else None
+    if expected_policy_id is not None:
+        policy_id_valid = (
+            kernel_policy_id is not None
+            and kernel_policy_id > 0
+            and kernel_policy_id == expected_policy_id
+        )
+    else:
+        # If the kernel explicitly reported policy_id == 0 (no active policy), fail closed.
+        policy_id_valid = kernel_policy_id is None or kernel_policy_id > 0
+
     all_pids_present = all(kp.pid is not None and kp.pid > 0 for kp in scoped_kprobes)
     probe_matrix_exact = (
         not missing_probes and not duplicate_probes and not unexpected_probes
@@ -1061,6 +1280,7 @@ def analyze_blast(
         log_text is not None
         and has_explicit_manifest
         and has_valid_stats
+        and policy_id_valid
         and dropped_events == 0
         and inconclusive_count == 0
         and probes_total > 0
@@ -1093,6 +1313,7 @@ def analyze_blast(
         dropped_events=dropped_events,
         mismatches=mismatch_count,
         result=comp_result,
+        kernel_policy_id=kernel_policy_id,
     )
 
     # Pick default selected origin: explicit --origin, else highest-impact escalation source, else first type
