@@ -106,11 +106,19 @@ jobs:
           make secpolgen-image
           mkdir -p qnx_demo/build/secpolgen
           bash harness/run_qemu.sh qnx_demo/build/secpolgen_capture.ifs qnx_demo/build/secpolgen/secpolgen_capture.log 60
+          set +e
           python3 harness/extract_secpolgen.py qnx_demo/build/secpolgen/secpolgen_capture.log --out-dir qnx_demo/build/secpolgen
+          RC_EXT=$?
+          set -e
+          [ "$RC_EXT" -eq 0 ] || [ "$RC_EXT" -eq 1 ] || { echo "extract_secpolgen.py failed with exit $RC_EXT"; exit "$RC_EXT"; }
           if [ -f qnx_demo/build/secpolgen/qnx8_generated.secpol ] && [ -f qnx_demo/build/secpolgen/qnx8_unused.txt ]; then
+            set +e
             secpol-audit prune qnx_demo/build/secpolgen/qnx8_generated.secpol \
               --unused qnx_demo/build/secpolgen/qnx8_unused.txt \
               --errors qnx_demo/build/secpolgen/qnx8_errors.txt
+            RC_PRUNE=$?
+            set -e
+            [ "$RC_PRUNE" -eq 0 ] || [ "$RC_PRUNE" -eq 1 ] || { echo "secpol-audit prune failed with exit $RC_PRUNE"; exit "$RC_PRUNE"; }
           fi
 
       - name: Inspect and verify real libsecpolev logs
