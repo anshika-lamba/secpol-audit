@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>secpol-audit Codelab — From QNX Security Policy to Runtime Proof</title>
+<style>
+  :root {
+    --bg: #090D16;
+    --surface: #0F1623;
+    --surface-2: #131C2E;
+    --border: #1E293B;
+    --text: #E2E8F0;
+    --text-muted: #94A3B8;
+    --text-dim: #64748B;
+    --emerald: #10B981;
+    --crimson: #F43F5E;
+    --amber: #F59E0B;
+    --sans: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 14px;
+    line-height: 1.6;
+  }
+  a { color: #38BDF8; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 20px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+  .brand { font-weight: 600; color: #F8FAFC; }
+  .layout {
+    max-width: 1280px;
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: 280px minmax(0, 1fr);
+    gap: 20px;
+    padding: 20px;
+  }
+  .sidebar {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px;
+    height: fit-content;
+    position: sticky;
+    top: 64px;
+  }
+  .nav-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    border-radius: 6px;
+    color: var(--text-muted);
+    font-size: 13px;
+  }
+  .nav-item:hover { background: var(--surface-2); color: #F8FAFC; }
+  .content { display: flex; flex-direction: column; gap: 18px; }
+  .step-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 18px 20px;
+  }
+  .step-card h2 { margin: 0 0 8px; font-size: 18px; color: #F8FAFC; }
+  .cmd-wrap {
+    position: relative;
+    background: #060910;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 14px;
+    margin: 10px 0;
+    font-family: var(--mono);
+    font-size: 12px;
+    overflow-x: auto;
+    white-space: pre;
+    color: #CBD5E1;
+  }
+  .copy-btn {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    border-radius: 5px;
+    padding: 3px 8px;
+    font-size: 11px;
+    cursor: pointer;
+  }
+  .copy-btn:hover { color: #F8FAFC; border-color: #475569; }
+  details {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    margin-top: 10px;
+  }
+  summary { cursor: pointer; font-weight: 600; color: #F1F5F9; font-size: 13px; }
+  table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 13px; }
+  th, td { padding: 8px 10px; border-bottom: 1px solid var(--border); text-align: left; }
+  th { color: var(--text-dim); font-size: 11px; text-transform: uppercase; }
+  @media (max-width: 900px) {
+    .layout { grid-template-columns: 1fr; }
+    .sidebar { position: static; }
+  }
+</style>
+</head>
+<body>
+<header class="topbar">
+  <span class="brand">secpol-audit Codelab · QNX Neutrino 8.0</span>
+  <a href="../index.html">← Back to Before/After Blast Explorer</a>
+</header>
+
+<div class="layout">
+  <aside class="sidebar" aria-label="Codelab Steps">
+    <div style="font-size:11px;text-transform:uppercase;color:#64748B;margin-bottom:8px;font-weight:600;">Progress</div>
+    <label class="nav-item"><input type="checkbox" data-step="step0" /><a href="#step0">Step 0 — Preflight</a></label>
+    <label class="nav-item"><input type="checkbox" data-step="step1" /><a href="#step1">Step 1 — Build</a></label>
+    <label class="nav-item"><input type="checkbox" data-step="step2" /><a href="#step2">Step 2 — Policy</a></label>
+    <label class="nav-item"><input type="checkbox" data-step="step3" /><a href="#step3">Step 3 — Enforce</a></label>
+    <label class="nav-item"><input type="checkbox" data-step="step4" /><a href="#step4">Step 4 — Observe</a></label>
+    <label class="nav-item"><input type="checkbox" data-step="step5" /><a href="#step5">Step 5 — Audit</a></label>
+    <label class="nav-item"><input type="checkbox" data-step="step6" /><a href="#step6">Step 6 — Remediate</a></label>
+    <label class="nav-item"><input type="checkbox" data-step="step7" /><a href="#step7">Step 7 — Verify &amp; Challenge</a></label>
+    <label class="nav-item"><input type="checkbox" data-step="trouble" /><a href="#trouble">Troubleshooting</a></label>
+  </aside>
+
+  <main class="content">
+    <section class="step-card">
+      <h1 style="margin:0 0 8px;font-size:22px;color:#F8FAFC;">From QNX Security Policy to Runtime Proof: Locking Down and Auditing a Resource Manager</h1>
+      <p style="color:#94A3B8;margin:0;">Build a minimal QNX 8.0 resource manager, lock down its mount point with <code>secpol_resmgr_attach()</code>, prove both <code>ALLOW</code> (<code>errno=0</code>) and <code>EACCES</code> (<code>errno=13</code>) attachment, capture PID-attributed <code>libsecpolev</code> telemetry (<code>dropped=0</code>), audit a two-hop escalation chain (<code>ivi_ui_t -&gt; diag_helper_t -&gt; can_hal_t</code>), and verify remediation.</p>
+    </section>
+
+    <section id="step0" class="step-card">
+      <h2>Step 0 — Preflight</h2>
+      <p>Verify QNX SDP 8.0 (<code>qcc</code>, <code>secpolcompile</code>, <code>mkifs</code>) and <code>qemu-system-x86_64</code>, or run the 5-minute offline replay on committed logs (note: offline replay verifies committed artifacts and does not replace running QNX 8.0 yourself).</p>
+      <div class="cmd-wrap"><button class="copy-btn">Copy</button>source ~/qnx800/qnxsdp-env.sh
+command -v qcc secpolcompile mkifs qemu-system-x86_64
+python3 harness/verify_offline.py</div>
+    </section>
+
+    <section id="step1" class="step-card">
+      <h2>Step 1 — Build</h2>
+      <p>Compile <code>codelab/starter/minimal_resmgr.c</code> with <code>qcc</code>.</p>
+      <div class="cmd-wrap"><button class="copy-btn">Copy</button>make -C codelab/starter minimal_resmgr</div>
+    </section>
+
+    <section id="step2" class="step-card">
+      <h2>Step 2 — Policy</h2>
+      <p>Compile <code>codelab/starter/vulnerable.secpol</code> into <code>secpol.bin</code>. Key primitives: <code>type</code>, <code>allow_attach</code>, <code>pathspace</code>, <code>settypeid</code>, and <code>channel_connect</code>.</p>
+      <div class="cmd-wrap"><button class="copy-btn">Copy</button>secpolcompile -o codelab/starter/vulnerable.secpol.bin codelab/starter/vulnerable.secpol</div>
+    </section>
+
+    <section id="step3" class="step-card">
+      <h2>Step 3 — Enforce</h2>
+      <p><code>kprobe.c</code> exercises <code>secpol_resmgr_attach()</code> on isolated, previously unused paths (<code>/dev/secpol_probe_allow</code> and <code>/dev/secpol_probe_deny_&lt;origin&gt;</code>).</p>
+      <details>
+        <summary>Expected QNX 8.0 Output (verbatim from evidence/blast/M3_blast_escalate.log)</summary>
+        <div class="cmd-wrap">KPROBE_JSON:{"origin":"audit_reader_t","op":"allow_attach","target":"/dev/secpol_probe_allow","path":"/dev/secpol_probe_allow","pid":40964,"ret":0,"outcome":"ALLOW","errno":0,"errno_name":"OK"}
+KPROBE_JSON:{"origin":"ivi_ui_t","op":"allow_attach","target":"/dev/secpol_probe_deny_ivi_ui_t","path":"/dev/secpol_probe_deny_ivi_ui_t","pid":16388,"ret":-1,"outcome":"DENY","errno":13,"errno_name":"EACCES"}</div>
+      </details>
+      <details>
+        <summary>Check Your Answer: EACCES (13) vs. EPERM (1) vs. EEXIST (17)</summary>
+        <p><code>EACCES</code> (13) = policy denied <code>allow_attach</code> (<code>DENY_POLICY</code>); <code>EPERM</code> (1) = missing <code>pathspace</code> ability (<code>DENY_ABILITY</code>); <code>EEXIST</code> (17) = path already occupied (<code>INCONCLUSIVE</code> / <code>PATH_COLLISION</code>, never <code>DENY</code>).</p>
+      </details>
+    </section>
+
+    <section id="step4" class="step-card">
+      <h2>Step 4 — Observe</h2>
+      <p>Run <code>secpol_sentry</code> (<code>secpolev_wait_event()</code> + <code>secpolev_get_pid()</code>) in an independent verification boot without <code>secpolgenerate</code> active so <code>dropped=0</code> is meaningful.</p>
+      <div class="cmd-wrap"><button class="copy-btn">Copy</button>make -C qnx_demo blast-images
+make qemu-blast</div>
+      <details>
+        <summary>Expected QNX 8.0 Output (verbatim from evidence/qemu_logs/M3_sentry_escalate.log)</summary>
+        <div class="cmd-wrap">SECPOLEV_STATS: ok=327 denied=2 dropped=0</div>
+      </details>
+    </section>
+
+    <section id="step5" class="step-card">
+      <h2>Step 5 — Audit</h2>
+      <p>Run <code>secpol-audit check</code> and <code>secpol-audit blast</code>. Inspect the 3 evidence states (<code>STATIC_ONLY</code>, <code>SYSCALL_ONLY_UNOBSERVABLE</code>, <code>OBSERVED_AND_CORRELATED</code>) and view the <a href="../index.html">Before/After Blast Explorer</a>.</p>
+      <div class="cmd-wrap"><button class="copy-btn">Copy</button>secpol-audit check codelab/starter/vulnerable.secpol
+secpol-audit blast qnx_demo/mutants/M3_blast_escalate.secpol --ifs qnx_demo/build_blast.ifs.in --log evidence/blast/M3_blast_escalate.log</div>
+      <details>
+        <summary>Expected QNX 8.0 Output (verbatim from evidence/qemu_logs/M3_sentry_escalate.log)</summary>
+        <div class="cmd-wrap">HOP1_SPAWN=OK child_pid=20485
+LINEAGE_HOP1:{"parent_pid":16388,"child_pid":20485,"origin_type":"ivi_ui_t","requested_target_type":"diag_helper_t","outcome":"OK","errno":0}
+HOP2_SPAWN=OK child_pid=20486
+LINEAGE_HOP2:{"parent_pid":20485,"child_pid":20486,"origin_type":"diag_helper_t","requested_target_type":"can_hal_t","outcome":"OK","errno":0}
+HOP2_RESULT=GRANTED coid=1073741825</div>
+      </details>
+    </section>
+
+    <section id="step6" class="step-card">
+      <h2>Step 6 — Remediate</h2>
+      <p>Remove the unsafe <code>settypeid:diag_helper_t</code> rule (as in <code>codelab/starter/fixed.secpol</code>) and recompile <code>secpol.bin</code>.</p>
+      <div class="cmd-wrap"><button class="copy-btn">Copy</button>secpolcompile -o codelab/starter/fixed.secpol.bin codelab/starter/fixed.secpol</div>
+    </section>
+
+    <section id="step7" class="step-card">
+      <h2>Step 7 — Verify &amp; Hands-On Challenge</h2>
+      <p>Under the fixed policy (<code>M0</code>), the attack is blocked at Hop 1 (<code>pid=16388</code> <code>DENIED</code>, <code>child_pid=-1</code>).</p>
+      <table>
+        <thead><tr><th>State</th><th>ivi_ui_t -&gt; diag_helper_t</th><th>diag_helper_t -&gt; can_hal_t</th><th>HOP2_RESULT</th></tr></thead>
+        <tbody>
+          <tr><td>Before (M3)</td><td>OK (pid 16388 -&gt; 20485)</td><td>OK (pid 20485 -&gt; 20486)</td><td>GRANTED</td></tr>
+          <tr><td>After (M0)</td><td>DENIED (errno=1, child_pid=-1)</td><td>Not reached</td><td>Blocked</td></tr>
+        </tbody>
+      </table>
+      <p style="margin-top:12px;"><strong>Challenge:</strong> Diagnose and fix <code>codelab/starter/challenge.secpol</code>, then compare against <code>codelab/starter/challenge_solution.secpol</code>.</p>
+      <div class="cmd-wrap"><button class="copy-btn">Copy</button>secpol-audit check codelab/starter/challenge.secpol</div>
+    </section>
+
+    <section id="trouble" class="step-card">
+      <h2>Troubleshooting</h2>
+      <ul>
+        <li><strong><code>EACCES</code> vs. <code>EPERM</code> vs. <code>EEXIST</code>:</strong> <code>13</code> = policy denied <code>allow_attach</code>; <code>1</code> = missing <code>pathspace</code>; <code>17</code> = path collision (<code>INCONCLUSIVE</code>).</li>
+        <li><strong>Missing <code>SECPOL_TYPE_NAME</code>:</strong> Required by <code>secpol_posix_spawnattr_settypeid()</code> when passing a string type name.</li>
+        <li><strong><code>dropped=0</code> with <code>secpolgenerate</code>:</strong> Meaningful only in independent verification boots without <code>secpolgenerate</code> active.</li>
+        <li><strong><code>libsecpolev</code> single-consumer limit:</strong> Only one <code>secpol_sentry</code> instance can read <code>/dev/name/local/_tracelog</code> at a time.</li>
+        <li><strong>QEMU TCG idle shutdown:</strong> QNX does not power off QEMU after <code>=== SECPOL_AUDIT_DONE ===</code>; <code>harness/run_qemu.sh</code> treats <code>timeout</code> exit <code>124</code> as clean completion when the marker is present.</li>
+      </ul>
+    </section>
+  </main>
+</div>
+
+<script>
+document.querySelectorAll(".copy-btn").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    const code = btn.parentElement.textContent.replace(/^Copy\s*/, "");
+    if (navigator.clipboard) navigator.clipboard.writeText(code);
+    btn.textContent = "Copied";
+    setTimeout(() => { btn.textContent = "Copy"; }, 1200);
+  });
+});
+
+document.querySelectorAll("input[data-step]").forEach((cb) => {
+  const key = "secpol_codelab_" + cb.getAttribute("data-step");
+  cb.checked = localStorage.getItem(key) === "1";
+  cb.addEventListener("change", () => {
+    localStorage.setItem(key, cb.checked ? "1" : "0");
+  });
+});
+</script>
+</body>
+</html>

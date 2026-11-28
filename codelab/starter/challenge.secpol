@@ -1,0 +1,26 @@
+# Codelab Challenge: Find and fix the indirect privilege-escalation rule!
+# Run: secpol-audit check codelab/starter/challenge.secpol
+
+type sensor_hal_t;
+type logger_helper_t;
+type web_ui_t;
+
+allow_attach sensor_hal_t /dev/sensor_hal;
+allow sensor_hal_t self:ability {
+    nonroot
+    mem_phys:0xfd000000-0xfd010000
+    pathspace
+};
+
+allow logger_helper_t self:ability {
+    nonroot
+    settypeid:sensor_hal_t
+    gain_priv:mem_phys,pathspace
+};
+
+allow web_ui_t logger_helper_t : channel connect;
+allow web_ui_t self:ability {
+    nonroot
+    settypeid:logger_helper_t
+    gain_priv:settypeid
+};

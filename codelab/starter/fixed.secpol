@@ -1,0 +1,26 @@
+# Codelab Starter: Fixed Policy (removed unsafe settypeid:diag_helper_t)
+
+type can_hal_t;
+type diag_helper_t;
+type ivi_ui_t;
+type audit_reader_t;
+
+allow_attach can_hal_t /dev/name/local/can_ctrl;
+allow can_hal_t self:ability {
+    nonroot
+    mem_phys:0xfe000000-0xfe010000
+    io
+    pathspace
+    public_channel
+};
+allow can_hal_t self : channel connect;
+
+allow_attach diag_helper_t /dev/diag;
+
+allow ivi_ui_t diag_helper_t : channel connect;
+
+allow_attach audit_reader_t /dev/secpol_probe_allow;
+allow audit_reader_t self:ability {
+    nonroot
+    noinherit pathspace
+};
