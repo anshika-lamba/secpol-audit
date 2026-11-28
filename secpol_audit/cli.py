@@ -13,6 +13,7 @@ from secpol_audit.blast import (
     BlastReport,
     analyze_blast,
     diff_blast_reports,
+    load_expected_probes_manifest,
 )
 from secpol_audit.blast_html import render_blast_html
 from secpol_audit.checks import run_all_checks
@@ -480,6 +481,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_blast.add_argument("--format", choices=("text", "json"), default="text", help="Output format")
     p_blast.add_argument("--html", help="Write single-file offline Concentric Blast-Radius Explorer HTML")
     p_blast.add_argument("--completeness-out", help="Write Evidence Completeness JSON summary to file")
+    p_blast.add_argument(
+        "--expected-probes-file",
+        help="Path to versioned JSON manifest of expected probes required for COMPLETE",
+    )
     p_blast.add_argument("--after-policy", help="Optional remediated .secpol policy for Before vs. After HTML toggle")
     p_blast.add_argument("--after-log", help="Optional QEMU serial log for the --after-policy verification boot")
     p_blast.add_argument("--output", "-o", help="Write output to file instead of stdout")
@@ -708,6 +713,11 @@ def _cmd_blast(args: argparse.Namespace) -> int:
         )
         return 2
 
+    expected_probe_specs = (
+        load_expected_probes_manifest(args.expected_probes_file, policy=policy)
+        if getattr(args, "expected_probes_file", None)
+        else None
+    )
     report = analyze_blast(
         policy,
         policy_source_bytes=policy_path.read_bytes(),
@@ -715,6 +725,7 @@ def _cmd_blast(args: argparse.Namespace) -> int:
         log_text=log_text,
         log_path=log_path_str,
         origin_filter=args.origin,
+        expected_probe_specs=expected_probe_specs,
     )
 
     after_report: BlastReport | None = None

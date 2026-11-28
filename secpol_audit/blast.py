@@ -43,6 +43,21 @@ STATE_OBSERVED_AND_CORRELATED = "OBSERVED_AND_CORRELATED"
 STATE_SYSCALL_ONLY_UNOBSERVABLE = "SYSCALL_ONLY_UNOBSERVABLE"
 STATE_STATIC_ONLY = "STATIC_ONLY"
 
+EXPECTED_BLAST_PROBES: tuple[tuple[str, str, str], ...] = (
+    ("ivi_ui_t", "settypeid", "diag_helper_t"),
+    ("ivi_ui_t", "settypeid", "can_hal_t"),
+    ("ivi_ui_t", "channel_connect", "can_ctrl"),
+    ("ivi_ui_t", "allow_attach", "/dev/secpol_probe_deny_ivi_ui_t"),
+    ("diag_helper_t", "settypeid", "can_hal_t"),
+    ("diag_helper_t", "settypeid", "ivi_ui_t"),
+    ("diag_helper_t", "channel_connect", "can_ctrl"),
+    ("diag_helper_t", "allow_attach", "/dev/secpol_probe_deny_diag_helper_t"),
+    ("audit_reader_t", "settypeid", "can_hal_t"),
+    ("audit_reader_t", "settypeid", "diag_helper_t"),
+    ("audit_reader_t", "channel_connect", "can_ctrl"),
+    ("audit_reader_t", "allow_attach", "/dev/secpol_probe_allow"),
+)
+
 
 def classify_allow_attach_errno(
     ret: int | None,
@@ -84,6 +99,7 @@ class KprobeRecord:
     raw: str
     path: str | None = None
     pid: int | None = None
+    target_id: int | None = None
     ret: int | None = None
     errno_name: str | None = None
     classification: str | None = None
@@ -101,6 +117,10 @@ class KprobeRecord:
         }
         if self.path is not None:
             d["path"] = self.path
+        if self.pid is not None:
+            d["pid"] = self.pid
+        if self.target_id is not None:
+            d["target_id"] = self.target_id
         if self.ret is not None:
             d["ret"] = self.ret
         if self.errno_name is not None:
@@ -312,6 +332,7 @@ def parse_blast_log_text(
                 target = path_val
             ret_val = obj.get("ret")
             pid_val = obj.get("pid")
+            target_id_val = obj.get("target_id")
             err_num = obj.get("errno", 0)
             err_name = obj.get("errno_name")
             outcome = obj.get("outcome")
@@ -354,6 +375,7 @@ def parse_blast_log_text(
                     raw=line,
                     path=path_val if isinstance(path_val, str) and path_val else None,
                     pid=pid_val if isinstance(pid_val, int) and not isinstance(pid_val, bool) else None,
+                    target_id=target_id_val if isinstance(target_id_val, int) and not isinstance(target_id_val, bool) else None,
                     ret=ret_val if isinstance(ret_val, int) and not isinstance(ret_val, bool) else None,
                     errno_name=err_name if isinstance(err_name, str) and err_name else None,
                     classification=classification,
@@ -399,6 +421,103 @@ def _name_matches_path(name_or_path: str, attach_path: str) -> bool:
     return False
 
 
+VALID_TARGET_KINDS = frozenset({"type", "channel", "path"})
+
+
+def load_expected_probes_manifest(
+    path: Path | str,
+    *,
+    policy: PolicyIR | None = None,
+) -> tuple[tuple[str, str, str], ...]:
+    """Load and strictly validate a JSON expected-probe manifest."""
+    path = Path(path)
+    span = SourceSpan(file=str(path), line=1, col=1)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ParseDiagnostic("PARSE_ERROR", f"Invalid expected-probes manifest '{path}': {exc}", span) from exc
+    if not isinstance(data, dict) or (data.get("schema_version") != 1 and data.get("version") != "1.0"):
+        raise ParseDiagnostic("PARSE_ERROR", f"Manifest '{path}' must have version '1.0' or schema_version == 1", span)
+    if not isinstance(data.get("probes"), list) or len(data["probes"]) != 12:
+        raise ParseDiagnostic("PARSE_ERROR", f"Manifest '{path}' must contain exactly 12 probes", span)
+
+    attaches_by_type = collect_type_attaches(policy) if policy is not None else {}
+
+    op_to_kind = {
+        "settypeid": "type",
+        "derive_type": "type",
+        "default_spawn_type": "type",
+        "channel_connect": "channel",
+        "allow_attach": "path",
+    }
+
+    seen_ids: set[str] = set()
+    seen_tuples: set[tuple[str, str, str]] = set()
+    specs: list[tuple[str, str, str]] = []
+    for idx, item in enumerate(data["probes"]):
+        if not isinstance(item, dict):
+            raise ParseDiagnostic("PARSE_ERROR", f"Manifest probe[{idx}] must be an object", span)
+        pid_str = item.get("id")
+        origin = item.get("origin")
+        op = item.get("op")
+        target = item.get("target")
+        tkind = item.get("target_kind")
+        req = item.get("evidence_requirement")
+        resolved_t = item.get("resolved_target_type")
+        for fname, fval in (("id", pid_str), ("origin", origin), ("target", target), ("evidence_requirement", req)):
+            if not isinstance(fval, str) or not fval.strip():
+                raise ParseDiagnostic("PARSE_ERROR", f"Manifest probe[{idx}] missing non-empty '{fname}'", span)
+        if pid_str in seen_ids:
+            raise ParseDiagnostic("PARSE_ERROR", f"Duplicate manifest probe id '{pid_str}'", span)
+        seen_ids.add(pid_str)
+        if op not in VALID_KPROBE_OPS:
+            raise ParseDiagnostic("PARSE_ERROR", f"Manifest probe[{idx}] unsupported op '{op}'", span)
+        if tkind not in VALID_TARGET_KINDS or tkind != op_to_kind[op]:
+            raise ParseDiagnostic("PARSE_ERROR", f"Manifest probe[{idx}] invalid target_kind '{tkind}' for op '{op}'", span)
+        if req not in ("pid+ability_range", "pid+server_type_range", "pid+attach_path", "pid+exact_path", "ALLOW", "DENY", "ALLOW_OR_DENY"):
+            raise ParseDiagnostic("PARSE_ERROR", f"Manifest probe[{idx}] invalid evidence_requirement '{req}'", span)
+        if op == "channel_connect" and (not isinstance(resolved_t, str) or not resolved_t.strip()):
+            raise ParseDiagnostic("PARSE_ERROR", f"Manifest probe[{idx}] missing 'resolved_target_type' for channel_connect", span)
+        if policy is not None:
+            if origin not in policy.types:
+                raise ParseDiagnostic("PARSE_ERROR", f"Manifest probe[{idx}] unknown origin type '{origin}'", span)
+            if op == "channel_connect":
+                if resolved_t not in policy.types:
+                    raise ParseDiagnostic("PARSE_ERROR", f"Manifest probe[{idx}] unknown resolved_target_type '{resolved_t}'", span)
+                eff_types: set[str] = set()
+                for tname, alist in attaches_by_type.items():
+                    for _ft, ap_path, _raw, ct in alist:
+                        if _name_matches_path(target, ap_path):
+                            eff_types.add(ct if ct else tname)
+                if eff_types and eff_types != {resolved_t}:
+                    raise ParseDiagnostic(
+                        "PARSE_ERROR",
+                        f"Manifest probe[{idx}] resolved_target_type '{resolved_t}' disagrees with policy channel types {sorted(eff_types)}",
+                        span,
+                    )
+        tup = (origin, op, target)
+        if tup in seen_tuples:
+            raise ParseDiagnostic("PARSE_ERROR", f"Duplicate manifest probe tuple {tup}", span)
+        seen_tuples.add(tup)
+        specs.append(tup)
+    return tuple(specs)
+
+
+def _has_valid_post_marker_stats(log_text: str) -> bool:
+    """Return True iff `=== SECPOL_AUDIT_DONE ===` is present AND a strict `SECPOLEV_STATS:` follows it."""
+    import re
+    stats_re = re.compile(r"^SECPOLEV_STATS:\s*ok=\d+\s+denied=\d+\s+dropped=\d+\s*$")
+    seen_done = False
+    for raw_line in log_text.splitlines():
+        line = raw_line.rstrip("\r\n")
+        if "=== SECPOL_AUDIT_DONE ===" in line:
+            seen_done = True
+            continue
+        if seen_done and stats_re.match(line):
+            return True
+    return False
+
+
 def _find_kernel_witness(
     events: list[SecpolEvent],
     origin: str,
@@ -407,19 +526,25 @@ def _find_kernel_witness(
     expected_outcome: str | None,
     *,
     probe_pid: int | None = None,
+    target_id: int | None = None,
+    server_types_for_target: tuple[str, ...] = (),
     used_event_lines: set[int] | None = None,
 ) -> SecpolEvent | None:
     """Correlate a matching `SECPOLEV_JSON:` event for `(origin, op, target)`."""
+    if probe_pid is None or probe_pid <= 0:
+        return None
+
     want_verdict = (
         ("OK" if expected_outcome == "ALLOW" else "DENIED")
         if expected_outcome in ("ALLOW", "DENY")
         else None
     )
 
+    matches: list[SecpolEvent] = []
     for ev in events:
         if used_event_lines is not None and ev.line in used_event_lines:
             continue
-        if probe_pid is not None and ev.pid is not None and ev.pid != probe_pid:
+        if ev.pid is None or ev.pid <= 0 or ev.pid != probe_pid:
             continue
         if ev.type != origin:
             continue
@@ -427,15 +552,23 @@ def _find_kernel_witness(
             continue
         if op in ("settypeid", "derive_type", "default_spawn_type"):
             if ev.kind == "ability" and ev.ability == "settypeid":
-                return ev
+                if target_id is None or target_id < 0 or ev.range is None:
+                    continue
+                if ev.range[0] <= target_id <= ev.range[1]:
+                    matches.append(ev)
         elif op == "channel_connect":
+            if len(server_types_for_target) != 1:
+                continue
             if ev.kind == "ability" and ev.ability == "channel_connect":
-                return ev
-            if ev.kind == "link" and ev.path and _name_matches_path(target, ev.path):
-                return ev
+                if target_id is None or target_id < 0 or ev.range is None:
+                    continue
+                if ev.range[0] <= target_id <= ev.range[1]:
+                    matches.append(ev)
         elif op == "allow_attach":
             if ev.kind == "attach" and ev.path and _name_matches_path(target, ev.path):
-                return ev
+                matches.append(ev)
+    if len(matches) == 1:
+        return matches[0]
     return None
 
 
@@ -459,8 +592,11 @@ def _static_prediction_for_op(
             server_types.append(target)
         else:
             for tname, alist in sorted(attaches_by_type.items()):
-                if any(_name_matches_path(target, ap_path) for _ft, ap_path, _raw, _ct in alist):
-                    server_types.append(tname)
+                for _ft, ap_path, _raw, ct in alist:
+                    if _name_matches_path(target, ap_path):
+                        eff = ct if ct else tname
+                        if eff not in server_types:
+                            server_types.append(eff)
         allowed = any(
             e.src == origin and e.mechanism == "channel_connect" and e.dst in server_types
             for e in path_res.review_edges
@@ -487,6 +623,7 @@ def analyze_blast(
     origin_filter: str | None = None,
     execution_mode: str | None = None,
     expected_probes: int | None = None,
+    expected_probe_specs: tuple[tuple[str, str, str], ...] | None = None,
 ) -> BlastReport:
     """Build an evidence-aware concentric blast-radius report across all 3 oracles."""
     if origin_filter and origin_filter not in policy.types:
@@ -519,10 +656,42 @@ def analyze_blast(
         else 0
     )
 
-    # Index kprobes by (origin, op, target)
-    kprobe_index: dict[tuple[str, str, str], KprobeRecord] = {}
+    # Index kprobes by (origin, op, target) as a list so duplicates are NEVER overwritten
+    kprobes_by_tuple: dict[tuple[str, str, str], list[KprobeRecord]] = defaultdict(list)
     for kp in kprobes:
-        kprobe_index[(kp.origin, kp.op, kp.target)] = kp
+        kprobes_by_tuple[(kp.origin, kp.op, kp.target)].append(kp)
+
+    def _server_types_for_channel(target_name: str) -> tuple[str, ...]:
+        if target_name in policy.types:
+            return (target_name,)
+        found: set[str] = set()
+        for tname, alist in sorted(attaches_by_type.items()):
+            for _ft, ap_path, _raw, ct in alist:
+                if _name_matches_path(target_name, ap_path):
+                    found.add(ct if ct else tname)
+        return tuple(sorted(found))
+
+    # Build one authoritative 1-to-1 PID-enforced correlation mapping for BOTH receipts and completeness.
+    witness_by_kprobe_line: dict[int, SecpolEvent] = {}
+    used_witness_lines: set[int] = set()
+    for kp in kprobes:
+        if kp.pid is None or kp.pid <= 0:
+            continue
+        srv_types = _server_types_for_channel(kp.target) if kp.op == "channel_connect" else ()
+        w = _find_kernel_witness(
+            secpolev_events,
+            kp.origin,
+            kp.op,
+            kp.target,
+            kp.outcome,
+            probe_pid=kp.pid,
+            target_id=kp.target_id,
+            server_types_for_target=srv_types,
+            used_event_lines=used_witness_lines,
+        )
+        if w is not None:
+            used_witness_lines.add(w.line)
+            witness_by_kprobe_line[kp.line] = w
 
     # Build adjacency maps for static BFS
     esc_adj: dict[str, list[GraphEdge]] = defaultdict(list)
@@ -558,7 +727,7 @@ def analyze_blast(
             policy, path_res, attaches_by_type, origin, op, target
         )
         syscall_out = kp.outcome if kp is not None else None
-        witness = _find_kernel_witness(secpolev_events, origin, op, target, syscall_out)
+        witness = witness_by_kprobe_line.get(kp.line) if kp is not None else None
 
         if kp is not None and witness is not None:
             ev_state = STATE_OBSERVED_AND_CORRELATED
@@ -631,73 +800,86 @@ def analyze_blast(
                 continue
             edge = esc_parent_edge[dst]
             ring = 3 if hop >= 2 else 2
-            kp = kprobe_index.get((edge.src, "settypeid", edge.dst))
-            if kp is not None:
-                consumed_kprobe_lines.add(kp.line)
-            rec = _make_receipt(edge.src, edge.mechanism, "ESCALATION", edge.dst, hop, ring, kp)
-            view_receipts.append(rec)
-            origin_receipt_keys.add((rec.origin, rec.op, rec.target))
-            edge_state_for_dst[dst] = rec.evidence_state
-            if (rec.origin, rec.op, rec.target) not in seen_receipt_keys:
-                seen_receipt_keys.add((rec.origin, rec.op, rec.target))
-                all_receipts.append(rec)
+            matching_kps = kprobes_by_tuple.get((edge.src, "settypeid", edge.dst), [])
+            if not matching_kps:
+                rec = _make_receipt(edge.src, edge.mechanism, "ESCALATION", edge.dst, hop, ring, None)
+                view_receipts.append(rec)
+                edge_state_for_dst[dst] = rec.evidence_state
+                if (rec.origin, rec.op, rec.target) not in seen_receipt_keys:
+                    seen_receipt_keys.add((rec.origin, rec.op, rec.target))
+                    all_receipts.append(rec)
+            else:
+                is_new_global = (edge.src, edge.mechanism, edge.dst) not in seen_receipt_keys
+                for kp in matching_kps:
+                    consumed_kprobe_lines.add(kp.line)
+                    rec = _make_receipt(edge.src, edge.mechanism, "ESCALATION", edge.dst, hop, ring, kp)
+                    view_receipts.append(rec)
+                    edge_state_for_dst[dst] = rec.evidence_state
+                    if is_new_global:
+                        all_receipts.append(rec)
+                seen_receipt_keys.add((edge.src, edge.mechanism, edge.dst))
+            origin_receipt_keys.add((edge.src, edge.mechanism, edge.dst))
 
         # 2. Build direct REVIEW_ONLY IPC edge receipts
         for dst, edge in sorted(rev_neighbors.items()):
             # Match kprobe by type name OR any attach path name of `dst`
-            kp = kprobe_index.get((origin, "channel_connect", dst))
-            if kp is None:
+            matching_kps = kprobes_by_tuple.get((origin, "channel_connect", dst), [])
+            if not matching_kps:
                 for _ft, ap_path, _r, _ct in attaches_by_type.get(dst, []):
                     base = ap_path.rsplit("/", 1)[-1]
-                    if (origin, "channel_connect", base) in kprobe_index:
-                        kp = kprobe_index[(origin, "channel_connect", base)]
+                    if (origin, "channel_connect", base) in kprobes_by_tuple:
+                        matching_kps = kprobes_by_tuple[(origin, "channel_connect", base)]
                         break
-            if kp is not None:
-                consumed_kprobe_lines.add(kp.line)
-            rec = _make_receipt(origin, edge.mechanism, "REVIEW_ONLY", dst, 1, 1, kp)
-            view_receipts.append(rec)
-            origin_receipt_keys.add((rec.origin, rec.op, rec.target))
-            if dst not in edge_state_for_dst:
-                edge_state_for_dst[dst] = rec.evidence_state
-            if (rec.origin, rec.op, rec.target) not in seen_receipt_keys:
-                seen_receipt_keys.add((rec.origin, rec.op, rec.target))
-                all_receipts.append(rec)
+            if not matching_kps:
+                rec = _make_receipt(origin, edge.mechanism, "REVIEW_ONLY", dst, 1, 1, None)
+                view_receipts.append(rec)
+                if dst not in edge_state_for_dst:
+                    edge_state_for_dst[dst] = rec.evidence_state
+                if (rec.origin, rec.op, rec.target) not in seen_receipt_keys:
+                    seen_receipt_keys.add((rec.origin, rec.op, rec.target))
+                    all_receipts.append(rec)
+            else:
+                is_new_global = (origin, edge.mechanism, dst) not in seen_receipt_keys
+                for kp in matching_kps:
+                    consumed_kprobe_lines.add(kp.line)
+                    rec = _make_receipt(origin, edge.mechanism, "REVIEW_ONLY", dst, 1, 1, kp)
+                    view_receipts.append(rec)
+                    if dst not in edge_state_for_dst:
+                        edge_state_for_dst[dst] = rec.evidence_state
+                    if is_new_global:
+                        all_receipts.append(rec)
+                seen_receipt_keys.add((origin, edge.mechanism, dst))
+            origin_receipt_keys.add((origin, edge.mechanism, dst))
 
-        # 3. Attach every kprobe executed from `origin` (including denied negative probes!)
+        # 3. Attach every remaining kprobe executed from `origin` (including duplicates & denied negative probes!)
         for kp in kprobes:
-            if kp.origin != origin:
-                continue
-            if kp.line in consumed_kprobe_lines:
-                continue
-            # Avoid duplicating if already added above via exact (origin, op, target)
-            if (kp.origin, kp.op, kp.target) in origin_receipt_keys:
-                continue
-            ring = 2 if kp.op == "settypeid" else 1
-            rec = _make_receipt(kp.origin, kp.op, "PROBE", kp.target, 1, ring, kp)
-            view_receipts.append(rec)
-            origin_receipt_keys.add((rec.origin, rec.op, rec.target))
-            if (rec.origin, rec.op, rec.target) not in seen_receipt_keys:
-                seen_receipt_keys.add((rec.origin, rec.op, rec.target))
+                if kp.origin != origin:
+                    continue
+                if kp.line in consumed_kprobe_lines:
+                    continue
+                ring = 2 if kp.op == "settypeid" else 1
+                rec = _make_receipt(kp.origin, kp.op, "PROBE", kp.target, 1, ring, kp)
+                view_receipts.append(rec)
                 all_receipts.append(rec)
 
         # Assemble concentric nodes (Ring 0, Ring 1, Ring 2, Ring 3)
         included_types = set(esc_hop.keys()) | set(rev_neighbors.keys())
         reachable_sinks: list[str] = []
         for tname in sorted(included_types):
-            is_sink, reasons, ab_list, at_list = _node_meta(tname)
-            if tname == origin:
-                ring, hop, mech = 0, 0, "origin"
-            elif tname in esc_hop:
-                hop = esc_hop[tname]
-                mech = esc_mech[tname]
-                ring = 3 if hop >= 2 else 2
-                if is_sink:
-                    reachable_sinks.append(tname)
-            else:
-                hop = 1
-                ring = 1
-                mech = rev_neighbors[tname].mechanism
-            view_nodes.append(
+                is_sink, reasons, ab_list, at_list = _node_meta(tname)
+                if tname == origin:
+                    ring, hop, mech = 0, 0, "origin"
+                elif tname in esc_hop:
+                    hop = esc_hop[tname]
+                    mech = esc_mech[tname]
+                    ring = 3 if hop >= 2 else 2
+                    if is_sink:
+                        reachable_sinks.append(tname)
+                else:
+                    hop = 1
+                    ring = 1
+                    mech = rev_neighbors[tname].mechanism
+                view_nodes.append(
                 BlastNode(
                     name=tname,
                     ring=ring,
@@ -729,19 +911,33 @@ def analyze_blast(
     # Wait: completeness reflects ALL kprobes in the log when --origin is omitted, or filtered origin's kprobes when --origin is set
     scoped_kprobes = [kp for kp in kprobes if not origin_filter or kp.origin == origin_filter]
     probes_completed = len(scoped_kprobes)
-    # Expected probes: every scoped kprobe executed (or if no log, count of static escalation + connect edges)
-    probes_total = (
-        expected_probes
-        if expected_probes is not None
-        else (probes_completed if log_text is not None else len(all_receipts))
-    )
 
-    # Evaluate each scoped kprobe for completeness counts cleanly
+    active_expected_specs = expected_probe_specs if expected_probe_specs else None
+
+    missing_probes: list[tuple[str, str, str]] = []
+    duplicate_probes: list[tuple[str, str, str]] = []
+    unexpected_probes: list[tuple[str, str, str]] = []
+    if active_expected_specs is not None:
+        observed_counts: dict[tuple[str, str, str], int] = defaultdict(int)
+        for kp in scoped_kprobes:
+            observed_counts[(kp.origin, kp.op, kp.target)] += 1
+        expected_set = set(active_expected_specs)
+        missing_probes = [t for t in active_expected_specs if observed_counts[t] == 0]
+        duplicate_probes = [t for t in active_expected_specs if observed_counts[t] > 1]
+        unexpected_probes = [t for t in observed_counts if t not in expected_set]
+        probes_total = len(active_expected_specs)
+    else:
+        probes_total = (
+            expected_probes
+            if expected_probes is not None
+            else (probes_completed if log_text is not None else len(all_receipts))
+        )
+
+    # Evaluate each scoped kprobe for completeness counts using the authoritative 1-to-1 mapping
     correlated_count = 0
     unobservable_count = 0
     mismatch_count = 0
     inconclusive_count = 0
-    used_witness_lines: set[int] = set()
     for kp in scoped_kprobes:
         if kp.op == "allow_attach" and kp.classification in ("INCONCLUSIVE", "SETUP_FAILURE"):
             inconclusive_count += 1
@@ -751,29 +947,37 @@ def analyze_blast(
             )
             if static_pred != kp.outcome:
                 mismatch_count += 1
-        witness = _find_kernel_witness(
-            secpolev_events,
-            kp.origin,
-            kp.op,
-            kp.target,
-            kp.outcome,
-            probe_pid=kp.pid,
-            used_event_lines=used_witness_lines,
-        )
-        if witness is not None:
-            used_witness_lines.add(witness.line)
+        if kp.line in witness_by_kprobe_line:
             correlated_count += 1
         else:
             unobservable_count += 1
+
+    has_valid_stats = (
+        log_text is not None
+        and parsed_events is not None
+        and parsed_events.stats is not None
+        and _has_valid_post_marker_stats(log_text)
+    )
+    has_explicit_manifest = active_expected_specs is not None and len(active_expected_specs) == 12
+    all_pids_present = all(kp.pid is not None and kp.pid > 0 for kp in scoped_kprobes)
+    probe_matrix_exact = (
+        not missing_probes and not duplicate_probes and not unexpected_probes
+    )
 
     if mismatch_count > 0:
         comp_result = "MISMATCH"
     elif (
         log_text is not None
-        and probes_total > 0
-        and probes_completed == probes_total
+        and has_explicit_manifest
+        and has_valid_stats
         and dropped_events == 0
         and inconclusive_count == 0
+        and probes_total > 0
+        and probes_completed == probes_total
+        and probe_matrix_exact
+        and all_pids_present
+        and correlated_count == probes_total
+        and unobservable_count == 0
     ):
         comp_result = "COMPLETE"
     else:
