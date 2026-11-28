@@ -424,7 +424,11 @@ def _name_matches_path(name_or_path: str, attach_path: str) -> bool:
 VALID_TARGET_KINDS = frozenset({"type", "channel", "path"})
 
 
-def load_expected_probes_manifest(path: Path | str) -> tuple[tuple[str, str, str], ...]:
+def load_expected_probes_manifest(
+    path: Path | str,
+    *,
+    policy: PolicyIR | None = None,
+) -> tuple[tuple[str, str, str], ...]:
     """Load and strictly validate a JSON expected-probe manifest."""
     path = Path(path)
     span = SourceSpan(file=str(path), line=1, col=1)
@@ -434,8 +438,18 @@ def load_expected_probes_manifest(path: Path | str) -> tuple[tuple[str, str, str
         raise ParseDiagnostic("PARSE_ERROR", f"Invalid expected-probes manifest '{path}': {exc}", span) from exc
     if not isinstance(data, dict) or (data.get("schema_version") != 1 and data.get("version") != "1.0"):
         raise ParseDiagnostic("PARSE_ERROR", f"Manifest '{path}' must have version '1.0' or schema_version == 1", span)
-    if not isinstance(data.get("probes"), list) or not data["probes"]:
-        raise ParseDiagnostic("PARSE_ERROR", f"Manifest '{path}' must be a JSON object with non-empty 'probes' list", span)
+    if not isinstance(data.get("probes"), list) or len(data["probes"]) != 12:
+        raise ParseDiagnostic("PARSE_ERROR", f"Manifest '{path}' must contain exactly 12 probes", span)
+
+    attaches_by_type = collect_type_attaches(policy) if policy is not None else {}
+
+    op_to_kind = {
+        "settypeid": "type",
+        "derive_type": "type",
+        "default_spawn_type": "type",
+        "channel_connect": "channel",
+        "allow_attach": "path",
+    }
 
     seen_ids: set[str] = set()
     seen_tuples: set[tuple[str, str, str]] = set()
@@ -458,12 +472,29 @@ def load_expected_probes_manifest(path: Path | str) -> tuple[tuple[str, str, str
         seen_ids.add(pid_str)
         if op not in VALID_KPROBE_OPS:
             raise ParseDiagnostic("PARSE_ERROR", f"Manifest probe[{idx}] unsupported op '{op}'", span)
-        if tkind not in VALID_TARGET_KINDS:
-            raise ParseDiagnostic("PARSE_ERROR", f"Manifest probe[{idx}] invalid target_kind '{tkind}'", span)
+        if tkind not in VALID_TARGET_KINDS or tkind != op_to_kind[op]:
+            raise ParseDiagnostic("PARSE_ERROR", f"Manifest probe[{idx}] invalid target_kind '{tkind}' for op '{op}'", span)
         if req not in ("pid+ability_range", "pid+server_type_range", "pid+attach_path", "pid+exact_path", "ALLOW", "DENY", "ALLOW_OR_DENY"):
             raise ParseDiagnostic("PARSE_ERROR", f"Manifest probe[{idx}] invalid evidence_requirement '{req}'", span)
         if op == "channel_connect" and (not isinstance(resolved_t, str) or not resolved_t.strip()):
             raise ParseDiagnostic("PARSE_ERROR", f"Manifest probe[{idx}] missing 'resolved_target_type' for channel_connect", span)
+        if policy is not None:
+            if origin not in policy.types:
+                raise ParseDiagnostic("PARSE_ERROR", f"Manifest probe[{idx}] unknown origin type '{origin}'", span)
+            if op == "channel_connect":
+                if resolved_t not in policy.types:
+                    raise ParseDiagnostic("PARSE_ERROR", f"Manifest probe[{idx}] unknown resolved_target_type '{resolved_t}'", span)
+                eff_types: set[str] = set()
+                for tname, alist in attaches_by_type.items():
+                    for _ft, ap_path, _raw, ct in alist:
+                        if _name_matches_path(target, ap_path):
+                            eff_types.add(ct if ct else tname)
+                if eff_types and eff_types != {resolved_t}:
+                    raise ParseDiagnostic(
+                        "PARSE_ERROR",
+                        f"Manifest probe[{idx}] resolved_target_type '{resolved_t}' disagrees with policy channel types {sorted(eff_types)}",
+                        span,
+                    )
         tup = (origin, op, target)
         if tup in seen_tuples:
             raise ParseDiagnostic("PARSE_ERROR", f"Duplicate manifest probe tuple {tup}", span)
@@ -561,8 +592,11 @@ def _static_prediction_for_op(
             server_types.append(target)
         else:
             for tname, alist in sorted(attaches_by_type.items()):
-                if any(_name_matches_path(target, ap_path) for _ft, ap_path, _raw, _ct in alist):
-                    server_types.append(tname)
+                for _ft, ap_path, _raw, ct in alist:
+                    if _name_matches_path(target, ap_path):
+                        eff = ct if ct else tname
+                        if eff not in server_types:
+                            server_types.append(eff)
         allowed = any(
             e.src == origin and e.mechanism == "channel_connect" and e.dst in server_types
             for e in path_res.review_edges
@@ -630,11 +664,12 @@ def analyze_blast(
     def _server_types_for_channel(target_name: str) -> tuple[str, ...]:
         if target_name in policy.types:
             return (target_name,)
-        found: list[str] = []
+        found: set[str] = set()
         for tname, alist in sorted(attaches_by_type.items()):
-            if any(_name_matches_path(target_name, ap_path) for _ft, ap_path, _raw, _ct in alist):
-                found.append(tname)
-        return tuple(found)
+            for _ft, ap_path, _raw, ct in alist:
+                if _name_matches_path(target_name, ap_path):
+                    found.add(ct if ct else tname)
+        return tuple(sorted(found))
 
     # Build one authoritative 1-to-1 PID-enforced correlation mapping for BOTH receipts and completeness.
     witness_by_kprobe_line: dict[int, SecpolEvent] = {}
@@ -803,17 +838,17 @@ def analyze_blast(
                 if (rec.origin, rec.op, rec.target) not in seen_receipt_keys:
                     seen_receipt_keys.add((rec.origin, rec.op, rec.target))
                     all_receipts.append(rec)
-                else:
-                    is_new_global = (origin, edge.mechanism, dst) not in seen_receipt_keys
-                    for kp in matching_kps:
-                        consumed_kprobe_lines.add(kp.line)
-                        rec = _make_receipt(origin, edge.mechanism, "REVIEW_ONLY", dst, 1, 1, kp)
-                        view_receipts.append(rec)
-                        if dst not in edge_state_for_dst:
-                            edge_state_for_dst[dst] = rec.evidence_state
-                        if is_new_global:
-                            all_receipts.append(rec)
-                    seen_receipt_keys.add((origin, edge.mechanism, dst))
+            else:
+                is_new_global = (origin, edge.mechanism, dst) not in seen_receipt_keys
+                for kp in matching_kps:
+                    consumed_kprobe_lines.add(kp.line)
+                    rec = _make_receipt(origin, edge.mechanism, "REVIEW_ONLY", dst, 1, 1, kp)
+                    view_receipts.append(rec)
+                    if dst not in edge_state_for_dst:
+                        edge_state_for_dst[dst] = rec.evidence_state
+                    if is_new_global:
+                        all_receipts.append(rec)
+                seen_receipt_keys.add((origin, edge.mechanism, dst))
             origin_receipt_keys.add((origin, edge.mechanism, dst))
 
         # 3. Attach every remaining kprobe executed from `origin` (including duplicates & denied negative probes!)
@@ -923,7 +958,7 @@ def analyze_blast(
         and parsed_events.stats is not None
         and _has_valid_post_marker_stats(log_text)
     )
-    has_explicit_manifest = active_expected_specs is not None
+    has_explicit_manifest = active_expected_specs is not None and len(active_expected_specs) == 12
     all_pids_present = all(kp.pid is not None and kp.pid > 0 for kp in scoped_kprobes)
     probe_matrix_exact = (
         not missing_probes and not duplicate_probes and not unexpected_probes

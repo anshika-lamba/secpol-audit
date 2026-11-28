@@ -714,7 +714,7 @@ def _cmd_blast(args: argparse.Namespace) -> int:
         return 2
 
     expected_probe_specs = (
-        load_expected_probes_manifest(args.expected_probes_file)
+        load_expected_probes_manifest(args.expected_probes_file, policy=policy)
         if getattr(args, "expected_probes_file", None)
         else None
     )

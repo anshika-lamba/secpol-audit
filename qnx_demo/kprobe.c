@@ -161,15 +161,36 @@ static void probe_settypeid(const char *origin, const char *target_type) {
     }
 }
 
-static void probe_channel_connect(const char *origin, const char *name) {
+static void probe_channel_connect(const char *origin, const char *name_spec) {
+    char name_buf[256];
+    const char *name = name_spec;
+    uint32_t target_id = SECPOL_INVALID_TYPE;
+
+    if (name_spec != NULL) {
+        const char *eq = strchr(name_spec, '=');
+        if (eq != NULL) {
+            size_t nlen = (size_t)(eq - name_spec);
+            if (nlen >= sizeof(name_buf)) {
+                nlen = sizeof(name_buf) - 1;
+            }
+            memcpy(name_buf, name_spec, nlen);
+            name_buf[nlen] = '\0';
+            name = name_buf;
+            const char *server_type = eq + 1;
+            if (server_type[0] != '\0') {
+                target_id = secpol_get_type_id(NULL, server_type);
+            }
+        }
+    }
+
     errno = 0;
     int coid = name_open(name, 0);
     if (coid >= 0) {
         (void)name_close(coid);
-        emit_kprobe_json(origin, "channel_connect", name, "", SECPOL_INVALID_TYPE, coid, 1, 0);
+        emit_kprobe_json(origin, "channel_connect", name, "", target_id, coid, 1, 0);
     } else {
         int saved = errno ? errno : EPERM;
-        emit_kprobe_json(origin, "channel_connect", name, "", SECPOL_INVALID_TYPE, -1, 0, saved);
+        emit_kprobe_json(origin, "channel_connect", name, "", target_id, -1, 0, saved);
     }
 }
 

@@ -496,3 +496,128 @@ def test_fcp8_correlated_settypeid_updates_target_node_evidence_state() -> None:
     diag_view = rep.origins["diag_helper_t"]
     can_node = next(n for n in diag_view.nodes if n.name == "can_hal_t")
     assert can_node.evidence_state == STATE_OBSERVED_AND_CORRELATED
+
+
+# ---------------------------------------------------------------------------
+# Final channel evidence integration & manifest integrity tests
+# ---------------------------------------------------------------------------
+
+def test_cei1_one_entry_manifest_and_one_probe_log_never_complete() -> None:
+    pol = parse_secpol_file(M3_BLAST_SECPOL)
+    ifs = parse_ifs_file(BLAST_IFS)
+    one_probe_log = (
+        'KPROBE_JSON:{"origin":"ivi_ui_t","op":"settypeid","target":"diag_helper_t","pid":1000,"target_id":4,"ret":0,"outcome":"ALLOW","errno":0}\n'
+        'SECPOLEV_JSON:{"ts_ns":1000,"pid":1000,"verdict":"OK","proc":"kprobe","type":"ivi_ui_t","kind":"ability","ability":"settypeid","root":false,"range":[4,4]}\n'
+        '=== SECPOL_AUDIT_DONE ===\n'
+        'SECPOLEV_STATS: ok=1 denied=0 dropped=0\n'
+    )
+    rep = analyze_blast(
+        pol,
+        ifs=ifs,
+        log_text=one_probe_log,
+        expected_probe_specs=(("ivi_ui_t", "settypeid", "diag_helper_t"),),
+    )
+    assert rep.completeness.result != "COMPLETE"
+
+
+def test_cei2_manifest_rejects_11_and_13_entries(tmp_path: Path) -> None:
+    import json
+    import pytest
+    from secpol_audit.blast import load_expected_probes_manifest
+    from secpol_audit.ir import ParseDiagnostic
+    base = json.loads((Path(__file__).resolve().parent.parent / "qnx_demo" / "blast_expected_probes.json").read_text(encoding="utf-8"))
+    p11 = tmp_path / "m11.json"
+    p11.write_text(json.dumps({"version": "1.0", "probes": base["probes"][:11]}), encoding="utf-8")
+    with pytest.raises(ParseDiagnostic):
+        load_expected_probes_manifest(p11)
+
+    p13 = tmp_path / "m13.json"
+    extra = dict(base["probes"][0], id="p13", target="extra_t")
+    p13.write_text(json.dumps({"version": "1.0", "probes": base["probes"] + [extra]}), encoding="utf-8")
+    with pytest.raises(ParseDiagnostic):
+        load_expected_probes_manifest(p13)
+
+
+def test_cei3_manifest_rejects_wrong_op_target_kind(tmp_path: Path) -> None:
+    import json
+    import pytest
+    from secpol_audit.blast import load_expected_probes_manifest
+    from secpol_audit.ir import ParseDiagnostic
+    base = json.loads((Path(__file__).resolve().parent.parent / "qnx_demo" / "blast_expected_probes.json").read_text(encoding="utf-8"))
+    base["probes"][0]["target_kind"] = "channel"
+    p = tmp_path / "bad_kind.json"
+    p.write_text(json.dumps(base), encoding="utf-8")
+    with pytest.raises(ParseDiagnostic):
+        load_expected_probes_manifest(p)
+
+
+def test_cei4_manifest_rejects_nonexistent_origin_and_wrong_channel_type(tmp_path: Path) -> None:
+    import json
+    import pytest
+    from secpol_audit.blast import load_expected_probes_manifest
+    from secpol_audit.ir import ParseDiagnostic
+    pol = parse_secpol_file(M3_BLAST_SECPOL)
+    base = json.loads((Path(__file__).resolve().parent.parent / "qnx_demo" / "blast_expected_probes.json").read_text(encoding="utf-8"))
+
+    bad_orig = json.loads(json.dumps(base))
+    bad_orig["probes"][0]["origin"] = "nonexistent_t"
+    p1 = tmp_path / "bad_orig.json"
+    p1.write_text(json.dumps(bad_orig), encoding="utf-8")
+    with pytest.raises(ParseDiagnostic):
+        load_expected_probes_manifest(p1, policy=pol)
+
+    bad_chan = json.loads(json.dumps(base))
+    for item in bad_chan["probes"]:
+        if item["op"] == "channel_connect":
+            item["resolved_target_type"] = "diag_helper_t"
+            break
+    p2 = tmp_path / "bad_chan.json"
+    p2.write_text(json.dumps(bad_chan), encoding="utf-8")
+    with pytest.raises(ParseDiagnostic):
+        load_expected_probes_manifest(p2, policy=pol)
+
+
+def test_cei5_explicit_allow_attach_channel_type_override(tmp_path: Path) -> None:
+    pol_p = tmp_path / "override.secpol"
+    pol_p.write_text(
+        "type proc_t;\n"
+        "type chan_override_t;\n"
+        "type client_t;\n"
+        "allow_attach proc_t /dev/name/local/custom_chan chan_override_t;\n"
+        "allow client_t chan_override_t:channel connect;\n",
+        encoding="utf-8",
+    )
+    pol = parse_secpol_file(pol_p)
+    log = (
+        'KPROBE_JSON:{"origin":"client_t","op":"channel_connect","target":"custom_chan","pid":2001,"target_id":7,"ret":0,"outcome":"ALLOW","errno":0}\n'
+        'SECPOLEV_JSON:{"ts_ns":2001,"pid":2001,"verdict":"OK","proc":"kprobe","type":"client_t","kind":"ability","ability":"channel_connect","root":false,"range":[7,7]}\n'
+        '=== SECPOL_AUDIT_DONE ===\n'
+        'SECPOLEV_STATS: ok=1 denied=0 dropped=0\n'
+    )
+    rep = analyze_blast(pol, log_text=log)
+    corr = [r for r in rep.all_receipts if r.syscall_outcome is not None and r.evidence_state == STATE_OBSERVED_AND_CORRELATED]
+    assert len(corr) == 1
+    assert corr[0].resolved_target_type == "chan_override_t"
+
+
+def test_cei6_correlated_channel_connect_associated_with_review_edge(tmp_path: Path) -> None:
+    pol_p = tmp_path / "rev.secpol"
+    pol_p.write_text(
+        "type server_t;\n"
+        "type client_t;\n"
+        "allow_attach server_t /dev/name/local/my_chan;\n"
+        "allow client_t server_t:channel connect;\n",
+        encoding="utf-8",
+    )
+    pol = parse_secpol_file(pol_p)
+    log = (
+        'KPROBE_JSON:{"origin":"client_t","op":"channel_connect","target":"my_chan","pid":2002,"target_id":3,"ret":0,"outcome":"ALLOW","errno":0}\n'
+        'SECPOLEV_JSON:{"ts_ns":2002,"pid":2002,"verdict":"OK","proc":"kprobe","type":"client_t","kind":"ability","ability":"channel_connect","root":false,"range":[3,3]}\n'
+        '=== SECPOL_AUDIT_DONE ===\n'
+        'SECPOLEV_STATS: ok=1 denied=0 dropped=0\n'
+    )
+    rep = analyze_blast(pol, log_text=log)
+    rev_receipts = [r for r in rep.origins["client_t"].receipts if r.edge_kind == "REVIEW_ONLY" and r.target == "server_t"]
+    assert len(rev_receipts) == 1
+    assert rev_receipts[0].evidence_state == STATE_OBSERVED_AND_CORRELATED
+    assert rev_receipts[0].syscall_outcome == "ALLOW"
