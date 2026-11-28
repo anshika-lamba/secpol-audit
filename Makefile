@@ -3,8 +3,9 @@ PYTEST ?= pytest
 MUTANTS := M0_clean M1_no_connect M2_untyped_server M3_2hop_escalate M3_fixed
 SENTRY_MUTANTS := M0_sentry_clean M3_sentry_escalate
 BLAST_MUTANTS := M0_blast_clean M3_blast_escalate
+ADAS_BLAST_MUTANTS := ADAS_12svc_blast ADAS_12svc_fixed_blast
 
-.PHONY: test demo-report verify-offline verify-fixtures qemu-mutants sentry-binaries sentry-images qemu-sentry blast-binaries blast-images qemu-blast secpolgen-image qemu-secpolgen clean
+.PHONY: test demo-report verify-offline verify-fixtures qemu-mutants sentry-binaries sentry-images qemu-sentry blast-binaries blast-images qemu-blast adas-blast-images qemu-adas-blast secpolgen-image qemu-secpolgen clean
 
 test:
 	$(PYTEST) -v
@@ -57,6 +58,17 @@ qemu-blast:
 	@for m in $(BLAST_MUTANTS); do \
 		echo "=== Running QEMU x86_64 TCG for blast verification $$m ==="; \
 		bash harness/run_qemu.sh --require-post-marker "SECPOLEV_STATS:" qnx_demo/build/$$m.ifs qnx_demo/build/blast/$$m.log 60 || exit $$?; \
+	done
+
+adas-blast-images:
+	$(MAKE) -C qnx_demo adas-blast-images
+
+qemu-adas-blast:
+	$(MAKE) -C qnx_demo blast-binaries adas-blast-images
+	@mkdir -p qnx_demo/build/adas_blast
+	@for m in $(ADAS_BLAST_MUTANTS); do \
+		echo "=== Running QEMU x86_64 TCG for 12-service ADAS blast verification $$m ==="; \
+		bash harness/run_qemu.sh --require-post-marker "SECPOLEV_STATS:" qnx_demo/build/$$m.ifs qnx_demo/build/adas_blast/$$m.log 60 || exit $$?; \
 	done
 
 secpolgen-image:

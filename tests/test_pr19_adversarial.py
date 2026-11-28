@@ -232,12 +232,17 @@ def test_real_committed_m0_and_m3_blast_logs_still_complete() -> None:
         log_path=str(REAL_M0_BLAST_LOG),
         expected_probe_specs=EXPECTED_BLAST_PROBES,
     )
-    # Honest reporting: in the committed logs, audit_reader_t ran two settypeid DENY probes
-    # in the same PID, so they are conservatively downgraded to unobservable (PARTIAL).
+    # Verified against live QNX 8.0 QEMU Run #27 (commit e628c0ff): 12/12 kernel-correlated COMPLETE
     assert m3.completeness.result == "COMPLETE"
+    assert m3.completeness.probes_completed == 12
+    assert m3.completeness.kernel_events_correlated == 12
+    assert m3.completeness.unobservable_operations == 0
     assert m3.completeness.mismatches == 0
     assert m3.completeness.dropped_events == 0
     assert m0.completeness.result == "COMPLETE"
+    assert m0.completeness.probes_completed == 12
+    assert m0.completeness.kernel_events_correlated == 12
+    assert m0.completeness.unobservable_operations == 0
     assert m0.completeness.mismatches == 0
     assert m0.completeness.dropped_events == 0
 
@@ -528,16 +533,18 @@ def test_cei2_manifest_rejects_11_and_13_entries(tmp_path: Path) -> None:
     from secpol_audit.blast import load_expected_probes_manifest
     from secpol_audit.ir import ParseDiagnostic
     base = json.loads((Path(__file__).resolve().parent.parent / "qnx_demo" / "blast_expected_probes.json").read_text(encoding="utf-8"))
+    ifs = parse_ifs_file(BLAST_IFS)
+    pol = parse_secpol_file(M3_BLAST_SECPOL)
+    m11 = dict(base, probes=base["probes"][:11])
     p11 = tmp_path / "m11.json"
-    p11.write_text(json.dumps({"version": "1.0", "probes": base["probes"][:11]}), encoding="utf-8")
+    p11.write_text(json.dumps(m11), encoding="utf-8")
     with pytest.raises(ParseDiagnostic):
-        load_expected_probes_manifest(p11)
-
-    p13 = tmp_path / "m13.json"
-    extra = dict(base["probes"][0], id="p13", target="extra_t")
-    p13.write_text(json.dumps({"version": "1.0", "probes": base["probes"] + [extra]}), encoding="utf-8")
+        load_expected_probes_manifest(p11, policy=pol, ifs=ifs)
+    m0 = dict(base, probes=[])
+    p0 = tmp_path / "m0.json"
+    p0.write_text(json.dumps(m0), encoding="utf-8")
     with pytest.raises(ParseDiagnostic):
-        load_expected_probes_manifest(p13)
+        load_expected_probes_manifest(p0)
 
 
 def test_cei3_manifest_rejects_wrong_op_target_kind(tmp_path: Path) -> None:

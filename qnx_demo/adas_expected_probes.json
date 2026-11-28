@@ -1,0 +1,151 @@
+{
+  "schema_version": 1,
+  "version": "1.0",
+  "description": "16-probe verification matrix for 12-service ADAS QNX 8.0 image with can_chan_t channel-type override",
+  "probes": [
+    {
+      "id": "P01",
+      "origin": "ivi_ui_t",
+      "op": "settypeid",
+      "target": "diag_helper_t",
+      "target_kind": "type",
+      "resolved_target_type": "diag_helper_t",
+      "evidence_requirement": "pid+ability_range"
+    },
+    {
+      "id": "P02",
+      "origin": "ivi_ui_t",
+      "op": "settypeid",
+      "target": "can_hal_t",
+      "target_kind": "type",
+      "resolved_target_type": "can_hal_t",
+      "evidence_requirement": "pid+ability_range"
+    },
+    {
+      "id": "P03",
+      "origin": "ivi_ui_t",
+      "op": "channel_connect",
+      "target": "can_ctrl",
+      "target_kind": "channel",
+      "resolved_target_type": "can_chan_t",
+      "evidence_requirement": "pid+server_type_range"
+    },
+    {
+      "id": "P04",
+      "origin": "ivi_ui_t",
+      "op": "allow_attach",
+      "target": "/dev/secpol_probe_deny_ivi_ui_t",
+      "target_kind": "path",
+      "resolved_target_type": null,
+      "evidence_requirement": "pid+exact_path"
+    },
+    {
+      "id": "P05",
+      "origin": "diag_helper_t",
+      "op": "settypeid",
+      "target": "can_hal_t",
+      "target_kind": "type",
+      "resolved_target_type": "can_hal_t",
+      "evidence_requirement": "pid+ability_range"
+    },
+    {
+      "id": "P06",
+      "origin": "diag_helper_t",
+      "op": "settypeid",
+      "target": "ivi_ui_t",
+      "target_kind": "type",
+      "resolved_target_type": "ivi_ui_t",
+      "evidence_requirement": "pid+ability_range"
+    },
+    {
+      "id": "P07",
+      "origin": "diag_helper_t",
+      "op": "channel_connect",
+      "target": "can_ctrl",
+      "target_kind": "channel",
+      "resolved_target_type": "can_chan_t",
+      "evidence_requirement": "pid+server_type_range"
+    },
+    {
+      "id": "P08",
+      "origin": "diag_helper_t",
+      "op": "allow_attach",
+      "target": "/dev/secpol_probe_deny_diag_helper_t",
+      "target_kind": "path",
+      "resolved_target_type": null,
+      "evidence_requirement": "pid+exact_path"
+    },
+    {
+      "id": "P09",
+      "origin": "ota_agent_t",
+      "op": "settypeid",
+      "target": "can_hal_t",
+      "target_kind": "type",
+      "resolved_target_type": "can_hal_t",
+      "evidence_requirement": "pid+ability_range"
+    },
+    {
+      "id": "P10",
+      "origin": "ota_agent_t",
+      "op": "settypeid",
+      "target": "diag_helper_t",
+      "target_kind": "type",
+      "resolved_target_type": "diag_helper_t",
+      "evidence_requirement": "pid+ability_range"
+    },
+    {
+      "id": "P11",
+      "origin": "ota_agent_t",
+      "op": "channel_connect",
+      "target": "can_ctrl",
+      "target_kind": "channel",
+      "resolved_target_type": "can_chan_t",
+      "evidence_requirement": "pid+server_type_range"
+    },
+    {
+      "id": "P12",
+      "origin": "ota_agent_t",
+      "op": "allow_attach",
+      "target": "/dev/secpol_probe_deny_ota_agent_t",
+      "target_kind": "path",
+      "resolved_target_type": null,
+      "evidence_requirement": "pid+exact_path"
+    },
+    {
+      "id": "P13",
+      "origin": "planner_t",
+      "op": "settypeid",
+      "target": "can_hal_t",
+      "target_kind": "type",
+      "resolved_target_type": "can_hal_t",
+      "evidence_requirement": "pid+ability_range"
+    },
+    {
+      "id": "P14",
+      "origin": "planner_t",
+      "op": "settypeid",
+      "target": "diag_helper_t",
+      "target_kind": "type",
+      "resolved_target_type": "diag_helper_t",
+      "evidence_requirement": "pid+ability_range"
+    },
+    {
+      "id": "P15",
+      "origin": "planner_t",
+      "op": "channel_connect",
+      "target": "can_ctrl",
+      "target_kind": "channel",
+      "resolved_target_type": "can_chan_t",
+      "evidence_requirement": "pid+server_type_range"
+    },
+    {
+      "id": "P16",
+      "origin": "planner_t",
+      "op": "allow_attach",
+      "target": "/dev/secpol_probe_allow_planner",
+      "target_kind": "path",
+      "resolved_target_type": null,
+      "evidence_requirement": "pid+exact_path"
+    }
+  ]
+}

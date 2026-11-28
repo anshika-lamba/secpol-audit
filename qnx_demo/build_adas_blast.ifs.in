@@ -1,0 +1,45 @@
+[virtual=x86_64,multiboot] boot = {
+    startup-x86 -D 8250
+    PATH=/proc/boot:/bin:/usr/bin LD_LIBRARY_PATH=/proc/boot:/lib:/usr/lib procnto-smp-instr
+}
+
+[+script] startup-script = {
+    PATH=/proc/boot:/bin:/usr/bin
+    LD_LIBRARY_PATH=/proc/boot:/lib:/usr/lib
+    reopen /dev/text
+
+    display_msg "=== SECPOL_AUDIT_BLAST=@MUTANT_NAME@ ==="
+    secpolpush /proc/boot/secpol.bin
+
+    on -T secpol_sentry_t -u 25:25 /proc/boot/secpol_sentry -t 10 &
+    waitfor /dev/secpol_sentry 3
+
+    # Server launches as can_hal_t; policy overrides /dev/name/local/can_ctrl channel type to can_chan_t
+    on -T can_hal_t -u 23:23 /proc/boot/can_server &
+    waitfor /dev/name/local/can_ctrl 5
+
+    display_msg "=== PIDIN_BEGIN ==="
+    pidin -f a_n
+    display_msg "=== PIDIN_END ==="
+
+    on -T ivi_ui_t -u 31:31 /proc/boot/kprobe --origin ivi_ui_t --settypeid diag_helper_t,can_hal_t --connect can_ctrl=can_chan_t --attach /dev/secpol_probe_deny_ivi_ui_t
+    on -T diag_helper_t -u 32:32 /proc/boot/kprobe --origin diag_helper_t --settypeid can_hal_t,ivi_ui_t --connect can_ctrl=can_chan_t --attach /dev/secpol_probe_deny_diag_helper_t
+    on -T ota_agent_t -u 33:33 /proc/boot/kprobe --origin ota_agent_t --settypeid can_hal_t,diag_helper_t --connect can_ctrl=can_chan_t --attach /dev/secpol_probe_deny_ota_agent_t
+    on -T planner_t -u 34:34 /proc/boot/kprobe --origin planner_t --settypeid can_hal_t,diag_helper_t --connect can_ctrl=can_chan_t --attach /dev/secpol_probe_allow_planner
+
+    display_msg "=== SECPOL_AUDIT_DONE ==="
+}
+
+/proc/boot/secpol.bin=@SECPOL_BIN@
+
+[autoso=add]
+/usr/lib/ldqnx-64.so.2=ldqnx-64.so.2
+libc.so.6
+libsecpol.so
+libsecpolev.so
+/proc/boot/secpolpush=secpolpush
+/proc/boot/on=on
+/proc/boot/pidin=pidin
+/proc/boot/secpol_sentry=build/secpol_sentry
+/proc/boot/can_server=build/can_server
+/proc/boot/kprobe=build/kprobe

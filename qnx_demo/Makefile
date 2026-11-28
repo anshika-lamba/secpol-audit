@@ -15,8 +15,9 @@ BLAST_BINS    := $(BUILD_DIR)/can_server $(BUILD_DIR)/secpol_sentry $(BUILD_DIR)
 MUTANTS       := M0_clean M1_no_connect M2_untyped_server M3_2hop_escalate M3_fixed
 SENTRY_MUTANTS := M0_sentry_clean M3_sentry_escalate
 BLAST_MUTANTS  := M0_blast_clean M3_blast_escalate
+ADAS_BLAST_MUTANTS := ADAS_12svc_blast ADAS_12svc_fixed_blast
 
-.PHONY: all binaries images sentry-binaries sentry-images blast-binaries blast-images secpolgen-image clean check-sdp
+.PHONY: all binaries images sentry-binaries sentry-images blast-binaries blast-images adas-blast-images secpolgen-image clean check-sdp
 
 all: binaries images
 
@@ -131,6 +132,24 @@ images: check-sdp $(addprefix $(BUILD_DIR)/,$(addsuffix .ifs,$(MUTANTS)))
 sentry-images: check-sdp $(addprefix $(BUILD_DIR)/,$(addsuffix .ifs,$(SENTRY_MUTANTS)))
 
 blast-images: check-sdp $(addprefix $(BUILD_DIR)/,$(addsuffix .ifs,$(BLAST_MUTANTS)))
+
+$(BUILD_DIR)/ADAS_12svc_blast.secpol.bin: mutants/ADAS_12svc_blast.secpol | $(BUILD_DIR)
+	$(SECPOLCOMPILE) -o $@ $<
+
+$(BUILD_DIR)/ADAS_12svc_fixed_blast.secpol.bin: mutants/ADAS_12svc_fixed_blast.secpol | $(BUILD_DIR)
+	$(SECPOLCOMPILE) -o $@ $<
+
+$(BUILD_DIR)/ADAS_12svc_blast.ifs: build_adas_blast.ifs.in $(BUILD_DIR)/ADAS_12svc_blast.secpol.bin $(BLAST_BINS)
+	sed -e 's|@SECPOL_BIN@|$(BUILD_DIR)/ADAS_12svc_blast.secpol.bin|g' \
+	    -e 's|@MUTANT_NAME@|ADAS_12svc_blast|g' $< > $(BUILD_DIR)/ADAS_12svc_blast.build
+	$(MKIFS) $(BUILD_DIR)/ADAS_12svc_blast.build $@
+
+$(BUILD_DIR)/ADAS_12svc_fixed_blast.ifs: build_adas_blast.ifs.in $(BUILD_DIR)/ADAS_12svc_fixed_blast.secpol.bin $(BLAST_BINS)
+	sed -e 's|@SECPOL_BIN@|$(BUILD_DIR)/ADAS_12svc_fixed_blast.secpol.bin|g' \
+	    -e 's|@MUTANT_NAME@|ADAS_12svc_fixed_blast|g' $< > $(BUILD_DIR)/ADAS_12svc_fixed_blast.build
+	$(MKIFS) $(BUILD_DIR)/ADAS_12svc_fixed_blast.build $@
+
+adas-blast-images: check-sdp $(addprefix $(BUILD_DIR)/,$(addsuffix .ifs,$(ADAS_BLAST_MUTANTS)))
 
 $(BUILD_DIR)/secpolgen_capture.ifs: secpolgen_capture.ifs $(BUILD_DIR)/can_server $(BUILD_DIR)/dump_file
 	$(MKIFS) $< $@
