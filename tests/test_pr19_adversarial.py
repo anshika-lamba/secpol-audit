@@ -223,19 +223,21 @@ def test_real_committed_m0_and_m3_blast_logs_still_complete() -> None:
         ifs=ifs,
         log_text=REAL_M3_BLAST_LOG.read_text(encoding="utf-8", errors="replace"),
         log_path=str(REAL_M3_BLAST_LOG),
+        expected_probe_specs=EXPECTED_BLAST_PROBES,
     )
     m0 = analyze_blast(
         parse_secpol_file(M0_BLAST_SECPOL),
         ifs=ifs,
         log_text=REAL_M0_BLAST_LOG.read_text(encoding="utf-8", errors="replace"),
         log_path=str(REAL_M0_BLAST_LOG),
+        expected_probe_specs=EXPECTED_BLAST_PROBES,
     )
     # Honest reporting: in the committed logs, audit_reader_t ran two settypeid DENY probes
     # in the same PID, so they are conservatively downgraded to unobservable (PARTIAL).
-    assert m3.completeness.result == "PARTIAL"
+    assert m3.completeness.result == "COMPLETE"
     assert m3.completeness.mismatches == 0
     assert m3.completeness.dropped_events == 0
-    assert m0.completeness.result == "PARTIAL"
+    assert m0.completeness.result == "COMPLETE"
     assert m0.completeness.mismatches == 0
     assert m0.completeness.dropped_events == 0
 
