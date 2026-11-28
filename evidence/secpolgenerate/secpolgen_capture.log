@@ -11,8 +11,6 @@ ACPI table not found (0x4746434d)
 System behaves poorly without PCID support.
 overriding mask for controller 2, vector_base 0
 === SECPOLGEN_CAPTURE_BEGIN ===
-secpolgenerate: ignoring missing policy file /proc/boot/secpol.bin
-
 random: Random init failed, exiting. [random.c(296)]
 Unable to access "/dev/random" (2)
 === PIDIN_BEGIN ===

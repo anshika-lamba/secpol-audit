@@ -1,13 +1,13 @@
 {
   "target": "QNX Neutrino 8.0 \u00b7 QEMU x86_64 TCG",
   "execution": "independent-verification-boot",
-  "policy_path": "qnx_demo/mutants/M3_sentry_escalate.secpol",
-  "policy_hash": "0e8846961ecca1807e99773a56ceed4efb0d71ec74314a707a4790bc68053794",
+  "policy_path": "qnx_demo/mutants/M3_blast_escalate.secpol",
+  "policy_hash": "369d2cdd79696576a858f451309c5edc6af87cef8b5396a12147a1fc8f029cf7",
   "log_path": "qnx_demo/build/blast/M3_blast_escalate.log",
   "probes_total": 12,
   "probes_completed": 12,
-  "kernel_events_correlated": 9,
-  "unobservable_operations": 3,
+  "kernel_events_correlated": 12,
+  "unobservable_operations": 0,
   "dropped_events": 0,
   "mismatches": 0,
   "result": "COMPLETE"

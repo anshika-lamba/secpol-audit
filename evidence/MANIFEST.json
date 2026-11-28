@@ -1,0 +1,31 @@
+{
+  "source_commit": "fd70daed9539ef6b16da0bc756d6e12bb73ee85b",
+  "capture_date": "2026-11-28T03:42:21Z",
+  "qnx_sdp_version": "unknown",
+  "qcc_version": "unknown",
+  "qemu_version": "unknown",
+  "build_command": "make -C qnx_demo sentry-images blast-images secpolgen-image",
+  "policies_sha256": {
+    "M0_blast_clean.secpol": "e39d1656db194638d8cc02047fc169a9558d5fae1438921279e6ef9c9436f6ee",
+    "M0_clean.secpol": "f87318679e30ddddedd7258fb18890e617223c464380c87bdff7b946200c6159",
+    "M0_sentry_clean.secpol": "77c9b135166491777ed1e179c1f1f87950d5d47c3d7857489b818550b3df8a10",
+    "M1_no_connect.secpol": "ca5c7d025ff389fce6cadd8d9daac2ee3ce42388db282af8fc79e5e2257cdb25",
+    "M3_2hop_escalate.secpol": "c5ce22aa48878e0e1a2f93becdf6af36e2d9b38298d5066cfdd47977d94d9000",
+    "M3_blast_escalate.secpol": "369d2cdd79696576a858f451309c5edc6af87cef8b5396a12147a1fc8f029cf7",
+    "M3_fixed.secpol": "8378867f6268cdf6d2ef130e02e048075128ccccf6e8c133ac98317f585b9fdb",
+    "M3_sentry_escalate.secpol": "0e8846961ecca1807e99773a56ceed4efb0d71ec74314a707a4790bc68053794"
+  },
+  "images_sha256": {},
+  "evidence_logs_sha256": {
+    "blast/M0_blast_clean.log": "e995c461e4016470d5df3055aa6ee8ace5abd9195cfea9137892431fe587138b",
+    "blast/M3_blast_escalate.log": "426b67966e15097e865e9b3897c4dfc8f6d048700d6c1d612a24e807b8bfbb1b",
+    "qemu_logs/M0_clean.log": "b325d184129e524bda30f7602a13aad9198827b1b58beea65711a3fe26c068be",
+    "qemu_logs/M0_sentry_clean.log": "1636dcf07e727c5693d9d6d06909170205fc100f04b659583a996557912a008c",
+    "qemu_logs/M1_no_connect.log": "c8968d32f458861f1d98cde2208cf8d3b9fd0dabf78a28a6d4a2240276d4f29c",
+    "qemu_logs/M2_untyped_server.log": "3c4b754338b05c3368edf62bb167c2141143d6d933b855ae94d4142a9e9e7cc7",
+    "qemu_logs/M3_2hop_escalate.log": "df7db3f5586118b3a6c2b20202d497486f4881dca4361f2c26ad05fbbd781bd3",
+    "qemu_logs/M3_fixed.log": "1105161f4ec190d4bcd84a60d91ba2375cb2aff65e3e17268ebd89c70f5891d5",
+    "qemu_logs/M3_sentry_escalate.log": "fff1067a18f136437229718f63f70476c7b1b96a008cb83f938ceb5439bfe749",
+    "secpolgenerate/secpolgen_capture.log": "be1494d6e7fe466aa5ece2a4fd21d8d9dd0f9e8dee020cbe74592dced8cfd3f6"
+  }
+}
