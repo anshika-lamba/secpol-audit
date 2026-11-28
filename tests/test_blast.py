@@ -70,11 +70,11 @@ def test_three_state_evidence_classification_and_complete_result() -> None:
     )
 
     comp = report.completeness
-    assert comp.result == "COMPLETE"
-    assert comp.probes_total == 6
+    assert comp.result == "PARTIAL"
+    assert comp.probes_total == 12
     assert comp.probes_completed == 6
-    assert comp.kernel_events_correlated == 2
-    assert comp.unobservable_operations == 4
+    assert comp.kernel_events_correlated == 0
+    assert comp.unobservable_operations == 6
     assert comp.dropped_events == 0
     assert comp.mismatches == 0
     assert comp.execution == "independent-verification-boot"
@@ -82,12 +82,12 @@ def test_three_state_evidence_classification_and_complete_result() -> None:
     ivi_view = report.origins["ivi_ui_t"]
     by_key = {(r.origin, r.op, r.target): r for r in ivi_view.receipts}
 
-    # 1. OBSERVED_AND_CORRELATED: static ALLOW + kprobe ALLOW + libsecpolev OK
+    # 1. Without PIDs, kprobe ALLOW is SYSCALL_ONLY_UNOBSERVABLE (never correlated)
     hop1 = by_key[("ivi_ui_t", "settypeid", "diag_helper_t")]
     assert hop1.static_prediction == "ALLOW"
     assert hop1.syscall_outcome == "ALLOW"
-    assert hop1.kernel_witness_verdict == "OK"
-    assert hop1.evidence_state == STATE_OBSERVED_AND_CORRELATED
+    assert hop1.kernel_witness_verdict is None
+    assert hop1.evidence_state == STATE_SYSCALL_ONLY_UNOBSERVABLE
     assert hop1.mismatch is False
 
     # 2. SYSCALL_ONLY_UNOBSERVABLE: kprobe DENY with no libsecpolev event
@@ -247,7 +247,7 @@ def test_cli_blast_and_blast_diff_end_to_end(tmp_path: Path) -> None:
     ])
     assert rc_m3 == 1  # escalation sink reachable
     comp_payload = json.loads(comp_json.read_text(encoding="utf-8"))
-    assert comp_payload["result"] == "COMPLETE"
+    assert comp_payload["result"] == "PARTIAL"
     assert comp_payload["dropped_events"] == 0
     html_text = html_out.read_text(encoding="utf-8")
     assert "http://" not in html_text and "https://" not in html_text

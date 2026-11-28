@@ -43,6 +43,21 @@ STATE_OBSERVED_AND_CORRELATED = "OBSERVED_AND_CORRELATED"
 STATE_SYSCALL_ONLY_UNOBSERVABLE = "SYSCALL_ONLY_UNOBSERVABLE"
 STATE_STATIC_ONLY = "STATIC_ONLY"
 
+EXPECTED_BLAST_PROBES: tuple[tuple[str, str, str], ...] = (
+    ("ivi_ui_t", "settypeid", "diag_helper_t"),
+    ("ivi_ui_t", "settypeid", "can_hal_t"),
+    ("ivi_ui_t", "channel_connect", "can_ctrl"),
+    ("ivi_ui_t", "allow_attach", "/dev/secpol_probe_deny_ivi_ui_t"),
+    ("diag_helper_t", "settypeid", "can_hal_t"),
+    ("diag_helper_t", "settypeid", "ivi_ui_t"),
+    ("diag_helper_t", "channel_connect", "can_ctrl"),
+    ("diag_helper_t", "allow_attach", "/dev/secpol_probe_deny_diag_helper_t"),
+    ("audit_reader_t", "settypeid", "can_hal_t"),
+    ("audit_reader_t", "settypeid", "diag_helper_t"),
+    ("audit_reader_t", "channel_connect", "can_ctrl"),
+    ("audit_reader_t", "allow_attach", "/dev/secpol_probe_allow"),
+)
+
 
 def classify_allow_attach_errno(
     ret: int | None,
@@ -101,6 +116,8 @@ class KprobeRecord:
         }
         if self.path is not None:
             d["path"] = self.path
+        if self.pid is not None:
+            d["pid"] = self.pid
         if self.ret is not None:
             d["ret"] = self.ret
         if self.errno_name is not None:
@@ -416,10 +433,14 @@ def _find_kernel_witness(
         else None
     )
 
+    if probe_pid is None:
+        return None
+
+    matches: list[SecpolEvent] = []
     for ev in events:
         if used_event_lines is not None and ev.line in used_event_lines:
             continue
-        if probe_pid is not None and ev.pid is not None and ev.pid != probe_pid:
+        if ev.pid is None or ev.pid != probe_pid:
             continue
         if ev.type != origin:
             continue
@@ -427,15 +448,20 @@ def _find_kernel_witness(
             continue
         if op in ("settypeid", "derive_type", "default_spawn_type"):
             if ev.kind == "ability" and ev.ability == "settypeid":
-                return ev
+                matches.append(ev)
         elif op == "channel_connect":
             if ev.kind == "ability" and ev.ability == "channel_connect":
-                return ev
-            if ev.kind == "link" and ev.path and _name_matches_path(target, ev.path):
-                return ev
+                matches.append(ev)
+            elif ev.kind == "link" and ev.path and _name_matches_path(target, ev.path):
+                matches.append(ev)
         elif op == "allow_attach":
             if ev.kind == "attach" and ev.path and _name_matches_path(target, ev.path):
-                return ev
+                matches.append(ev)
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        # Multiple candidates for the same (pid, op, verdict) -> ambiguous, downgrade to unobservable
+        return None
     return None
 
 
@@ -487,6 +513,7 @@ def analyze_blast(
     origin_filter: str | None = None,
     execution_mode: str | None = None,
     expected_probes: int | None = None,
+    expected_probe_specs: tuple[tuple[str, str, str], ...] | None = None,
 ) -> BlastReport:
     """Build an evidence-aware concentric blast-radius report across all 3 oracles."""
     if origin_filter and origin_filter not in policy.types:
@@ -524,6 +551,33 @@ def analyze_blast(
     for kp in kprobes:
         kprobe_index[(kp.origin, kp.op, kp.target)] = kp
 
+    # Build one authoritative 1-to-1 PID-enforced correlation mapping for BOTH receipts and completeness.
+    # Detect ambiguous same-(pid, op, outcome) probes with different targets (cannot be disambiguated).
+    pid_op_targets: dict[tuple[int, str, str], set[str]] = defaultdict(set)
+    for kp in kprobes:
+        if kp.pid is not None and kp.op in ("settypeid", "channel_connect"):
+            pid_op_targets[(kp.pid, kp.op, kp.outcome)].add(kp.target)
+
+    witness_by_kprobe_line: dict[int, SecpolEvent] = {}
+    used_witness_lines: set[int] = set()
+    for kp in kprobes:
+        if kp.pid is None:
+            continue
+        if kp.op in ("settypeid", "channel_connect") and len(pid_op_targets[(kp.pid, kp.op, kp.outcome)]) > 1:
+            continue
+        w = _find_kernel_witness(
+            secpolev_events,
+            kp.origin,
+            kp.op,
+            kp.target,
+            kp.outcome,
+            probe_pid=kp.pid,
+            used_event_lines=used_witness_lines,
+        )
+        if w is not None:
+            used_witness_lines.add(w.line)
+            witness_by_kprobe_line[kp.line] = w
+
     # Build adjacency maps for static BFS
     esc_adj: dict[str, list[GraphEdge]] = defaultdict(list)
     rev_adj: dict[str, list[GraphEdge]] = defaultdict(list)
@@ -558,7 +612,7 @@ def analyze_blast(
             policy, path_res, attaches_by_type, origin, op, target
         )
         syscall_out = kp.outcome if kp is not None else None
-        witness = _find_kernel_witness(secpolev_events, origin, op, target, syscall_out)
+        witness = witness_by_kprobe_line.get(kp.line) if kp is not None else None
 
         if kp is not None and witness is not None:
             ev_state = STATE_OBSERVED_AND_CORRELATED
@@ -729,19 +783,35 @@ def analyze_blast(
     # Wait: completeness reflects ALL kprobes in the log when --origin is omitted, or filtered origin's kprobes when --origin is set
     scoped_kprobes = [kp for kp in kprobes if not origin_filter or kp.origin == origin_filter]
     probes_completed = len(scoped_kprobes)
-    # Expected probes: every scoped kprobe executed (or if no log, count of static escalation + connect edges)
-    probes_total = (
-        expected_probes
-        if expected_probes is not None
-        else (probes_completed if log_text is not None else len(all_receipts))
-    )
 
-    # Evaluate each scoped kprobe for completeness counts cleanly
+    active_expected_specs = expected_probe_specs
+    if active_expected_specs is None and log_text is not None and expected_probes is None and not origin_filter:
+        active_expected_specs = EXPECTED_BLAST_PROBES
+
+    missing_probes: list[tuple[str, str, str]] = []
+    duplicate_probes: list[tuple[str, str, str]] = []
+    unexpected_probes: list[tuple[str, str, str]] = []
+    if active_expected_specs is not None:
+        observed_counts: dict[tuple[str, str, str], int] = defaultdict(int)
+        for kp in scoped_kprobes:
+            observed_counts[(kp.origin, kp.op, kp.target)] += 1
+        expected_set = set(active_expected_specs)
+        missing_probes = [t for t in active_expected_specs if observed_counts[t] == 0]
+        duplicate_probes = [t for t in active_expected_specs if observed_counts[t] > 1]
+        unexpected_probes = [t for t in observed_counts if t not in expected_set]
+        probes_total = len(active_expected_specs)
+    else:
+        probes_total = (
+            expected_probes
+            if expected_probes is not None
+            else (probes_completed if log_text is not None else len(all_receipts))
+        )
+
+    # Evaluate each scoped kprobe for completeness counts using the authoritative 1-to-1 mapping
     correlated_count = 0
     unobservable_count = 0
     mismatch_count = 0
     inconclusive_count = 0
-    used_witness_lines: set[int] = set()
     for kp in scoped_kprobes:
         if kp.op == "allow_attach" and kp.classification in ("INCONCLUSIVE", "SETUP_FAILURE"):
             inconclusive_count += 1
@@ -751,29 +821,30 @@ def analyze_blast(
             )
             if static_pred != kp.outcome:
                 mismatch_count += 1
-        witness = _find_kernel_witness(
-            secpolev_events,
-            kp.origin,
-            kp.op,
-            kp.target,
-            kp.outcome,
-            probe_pid=kp.pid,
-            used_event_lines=used_witness_lines,
-        )
-        if witness is not None:
-            used_witness_lines.add(witness.line)
+        if kp.line in witness_by_kprobe_line:
             correlated_count += 1
         else:
             unobservable_count += 1
+
+    has_valid_stats = parsed_events is not None and parsed_events.stats is not None
+    all_pids_present = all(kp.pid is not None for kp in scoped_kprobes)
+    probe_matrix_exact = (
+        not missing_probes and not duplicate_probes and not unexpected_probes
+    )
 
     if mismatch_count > 0:
         comp_result = "MISMATCH"
     elif (
         log_text is not None
-        and probes_total > 0
-        and probes_completed == probes_total
+        and has_valid_stats
         and dropped_events == 0
         and inconclusive_count == 0
+        and probes_total > 0
+        and probes_completed == probes_total
+        and probe_matrix_exact
+        and all_pids_present
+        and correlated_count == probes_total
+        and unobservable_count == 0
     ):
         comp_result = "COMPLETE"
     else:
