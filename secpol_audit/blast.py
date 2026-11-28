@@ -428,6 +428,7 @@ def load_expected_probes_manifest(
     path: Path | str,
     *,
     policy: PolicyIR | None = None,
+    ifs: IfsIR | None = None,
 ) -> tuple[tuple[str, str, str], ...]:
     """Load and strictly validate a JSON expected-probe manifest."""
     path = Path(path)
@@ -450,6 +451,46 @@ def load_expected_probes_manifest(
         "channel_connect": "channel",
         "allow_attach": "path",
     }
+    op_to_req = {
+        "settypeid": "pid+ability_range",
+        "derive_type": "pid+ability_range",
+        "default_spawn_type": "pid+ability_range",
+        "channel_connect": "pid+server_type_range",
+        "allow_attach": "pid+exact_path",
+    }
+
+    # Pre-extract structured IFS server launch types and kprobe --connect specs
+    # using parser_ifs.py's parsed IfsCommand AST (never raw substring search).
+    ifs_non_kprobe_launch_types: set[str] = set()
+    ifs_kprobe_connect_specs: list[tuple[str, str, int]] = []
+    if ifs is not None:
+        for cmd in ifs.commands:
+            if cmd.is_on and cmd.on_type and cmd.executable != "kprobe":
+                ifs_non_kprobe_launch_types.add(cmd.on_type)
+            if cmd.executable == "kprobe":
+                toks = cmd.tokens
+                i = 0
+                while i < len(toks):
+                    if toks[i] == "--connect" and i + 1 < len(toks):
+                        csv_val = toks[i + 1]
+                        for spec in csv_val.split(","):
+                            if "=" not in spec:
+                                raise ParseDiagnostic(
+                                    "PARSE_ERROR",
+                                    f"IFS kprobe --connect spec '{spec}' missing '=server_type' annotation",
+                                    cmd.span,
+                                )
+                            ch_name, srv_t = spec.split("=", 1)
+                            if not ch_name.strip() or not srv_t.strip():
+                                raise ParseDiagnostic(
+                                    "PARSE_ERROR",
+                                    f"IFS kprobe --connect spec '{spec}' has empty channel name or server type",
+                                    cmd.span,
+                                )
+                            ifs_kprobe_connect_specs.append((ch_name.strip(), srv_t.strip(), cmd.span.line))
+                        i += 2
+                    else:
+                        i += 1
 
     seen_ids: set[str] = set()
     seen_tuples: set[tuple[str, str, str]] = set()
@@ -474,13 +515,40 @@ def load_expected_probes_manifest(
             raise ParseDiagnostic("PARSE_ERROR", f"Manifest probe[{idx}] unsupported op '{op}'", span)
         if tkind not in VALID_TARGET_KINDS or tkind != op_to_kind[op]:
             raise ParseDiagnostic("PARSE_ERROR", f"Manifest probe[{idx}] invalid target_kind '{tkind}' for op '{op}'", span)
-        if req not in ("pid+ability_range", "pid+server_type_range", "pid+attach_path", "pid+exact_path", "ALLOW", "DENY", "ALLOW_OR_DENY"):
-            raise ParseDiagnostic("PARSE_ERROR", f"Manifest probe[{idx}] invalid evidence_requirement '{req}'", span)
-        if op == "channel_connect" and (not isinstance(resolved_t, str) or not resolved_t.strip()):
-            raise ParseDiagnostic("PARSE_ERROR", f"Manifest probe[{idx}] missing 'resolved_target_type' for channel_connect", span)
+        if req != op_to_req[op]:
+            raise ParseDiagnostic(
+                "PARSE_ERROR",
+                f"Manifest probe[{idx}] invalid evidence_requirement '{req}' for op '{op}' (expected '{op_to_req[op]}')",
+                span,
+            )
+        if op in ("settypeid", "derive_type", "default_spawn_type"):
+            if resolved_t != target:
+                raise ParseDiagnostic(
+                    "PARSE_ERROR",
+                    f"Manifest probe[{idx}] resolved_target_type '{resolved_t}' must equal target '{target}' for op '{op}'",
+                    span,
+                )
+        elif op == "allow_attach":
+            if resolved_t is not None:
+                raise ParseDiagnostic(
+                    "PARSE_ERROR",
+                    f"Manifest probe[{idx}] resolved_target_type must be null for op 'allow_attach'",
+                    span,
+                )
+        elif op == "channel_connect":
+            if not isinstance(resolved_t, str) or not resolved_t.strip():
+                raise ParseDiagnostic(
+                    "PARSE_ERROR",
+                    f"Manifest probe[{idx}] missing 'resolved_target_type' for channel_connect",
+                    span,
+                )
+
+        attaching_proc_types: set[str] = set()
         if policy is not None:
             if origin not in policy.types:
                 raise ParseDiagnostic("PARSE_ERROR", f"Manifest probe[{idx}] unknown origin type '{origin}'", span)
+            if op in ("settypeid", "derive_type", "default_spawn_type") and target not in policy.types:
+                raise ParseDiagnostic("PARSE_ERROR", f"Manifest probe[{idx}] unknown target type '{target}'", span)
             if op == "channel_connect":
                 if resolved_t not in policy.types:
                     raise ParseDiagnostic("PARSE_ERROR", f"Manifest probe[{idx}] unknown resolved_target_type '{resolved_t}'", span)
@@ -489,12 +557,34 @@ def load_expected_probes_manifest(
                     for _ft, ap_path, _raw, ct in alist:
                         if _name_matches_path(target, ap_path):
                             eff_types.add(ct if ct else tname)
-                if eff_types and eff_types != {resolved_t}:
+                            attaching_proc_types.add(tname)
+                if len(eff_types) != 1 or eff_types != {resolved_t}:
                     raise ParseDiagnostic(
                         "PARSE_ERROR",
                         f"Manifest probe[{idx}] resolved_target_type '{resolved_t}' disagrees with policy channel types {sorted(eff_types)}",
                         span,
                     )
+
+        if ifs is not None and op == "channel_connect":
+            # Support both standard server launches (process type == channel type) and
+            # QNX 8.0 `allow_attach <proc_type> <path> <channel_type>;` overrides where
+            # the server process launches with `-T <proc_type>` while the channel's
+            # effective security type is `<channel_type>`.
+            expected_launch_types = attaching_proc_types if attaching_proc_types else {resolved_t}
+            if not (ifs_non_kprobe_launch_types & expected_launch_types):
+                raise ParseDiagnostic(
+                    "PARSE_ERROR",
+                    f"Manifest probe[{idx}] channel '{target}' (effective type '{resolved_t}') has no non-kprobe IFS launch with -T in {sorted(expected_launch_types)}",
+                    span,
+                )
+            for ch_name, srv_t, _line in ifs_kprobe_connect_specs:
+                if ch_name == target and srv_t != resolved_t:
+                    raise ParseDiagnostic(
+                        "PARSE_ERROR",
+                        f"Manifest probe[{idx}] resolved_target_type '{resolved_t}' disagrees with IFS kprobe --connect '{ch_name}={srv_t}'",
+                        span,
+                    )
+
         tup = (origin, op, target)
         if tup in seen_tuples:
             raise ParseDiagnostic("PARSE_ERROR", f"Duplicate manifest probe tuple {tup}", span)
@@ -957,6 +1047,7 @@ def analyze_blast(
         and parsed_events is not None
         and parsed_events.stats is not None
         and _has_valid_post_marker_stats(log_text)
+        and len(secpolev_events) == (parsed_events.stats.ok + parsed_events.stats.denied)
     )
     has_explicit_manifest = active_expected_specs is not None and len(active_expected_specs) == 12
     all_pids_present = all(kp.pid is not None and kp.pid > 0 for kp in scoped_kprobes)

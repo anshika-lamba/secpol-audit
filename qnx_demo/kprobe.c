@@ -10,26 +10,27 @@
  *
  * Emits one machine-parseable JSONL line per probe:
  *   KPROBE_JSON:{"origin":"...","op":"settypeid"|"channel_connect"|"allow_attach",
- *                "target":"...","path":"...","ret":0,"outcome":"ALLOW"|"DENY",
- *                "errno":0,"errno_name":"OK"}
+ *                "target":"...","path":"...","target_id":...,"pid":...,"ret":0,
+ *                "outcome":"ALLOW"|"DENY","errno":0,"errno_name":"OK"}
  *
  * Build (QNX SDP 8.0):
- *   qcc -Vgcc_ntox86_64 -Wall -Wextra -O2 -o build/kprobe kprobe.c -lsecpol
+ *   qcc -Vgcc_ntox86_64 -Wall -Wextra -Werror -O2 -o build/kprobe kprobe.c -lsecpol
  */
 
 #include <errno.h>
+#ifndef KPROBE_HOST_TEST
 /* Include <sys/iofunc.h> before <sys/dispatch.h> and <secpol/secpol.h> so QNX sets RESMGR_OCB_T/RESMGR_HANDLE_T */
 #include <sys/iofunc.h>
 #include <sys/dispatch.h>
 #include <secpol/secpol.h>
 #include <spawn.h>
+#include <sys/wait.h>
+#endif
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/wait.h>
 #include <unistd.h>
-
-extern char **environ;
 
 #define KPROBE_BIN_PATH "/proc/boot/kprobe"
 
@@ -68,6 +69,44 @@ static void json_escape(const char *src, char *dst, size_t dst_size) {
     }
     dst[j] = '\0';
 }
+
+/*
+ * Strictly parse `<channel_name>=<server_type>` for `--connect`.
+ * Rejects NULL, missing '=', empty channel name, empty server_type, or
+ * inputs that would truncate either destination buffer.
+ * Returns 0 on success, -1 on malformed input.
+ */
+static int parse_channel_connect_spec(
+    const char *name_spec,
+    char *name_buf,
+    size_t name_buf_size,
+    char *type_buf,
+    size_t type_buf_size
+) {
+    if (name_spec == NULL || name_buf == NULL || type_buf == NULL ||
+        name_buf_size < 2 || type_buf_size < 2) {
+        return -1;
+    }
+    const char *eq = strchr(name_spec, '=');
+    if (eq == NULL) {
+        return -1;
+    }
+    size_t nlen = (size_t)(eq - name_spec);
+    const char *server_type = eq + 1;
+    size_t tlen = strlen(server_type);
+    if (nlen == 0 || tlen == 0 || nlen >= name_buf_size || tlen >= type_buf_size) {
+        return -1;
+    }
+    memcpy(name_buf, name_spec, nlen);
+    name_buf[nlen] = '\0';
+    memcpy(type_buf, server_type, tlen);
+    type_buf[tlen] = '\0';
+    return 0;
+}
+
+#ifndef KPROBE_HOST_TEST
+
+extern char **environ;
 
 static const char *errno_to_name(int err_num) {
     switch (err_num) {
@@ -129,14 +168,14 @@ static void emit_kprobe_json(
     fflush(stdout);
 }
 
-static void probe_settypeid(const char *origin, const char *target_type) {
+static int probe_settypeid(const char *origin, const char *target_type) {
     uint32_t target_id = secpol_get_type_id(NULL, target_type);
 
     posix_spawnattr_t attr;
     if (posix_spawnattr_init(&attr) != 0) {
         int saved = errno ? errno : EINVAL;
         emit_kprobe_json(origin, "settypeid", target_type, "", target_id, -1, 0, saved);
-        return;
+        return 0;
     }
 
     errno = 0;
@@ -144,7 +183,7 @@ static void probe_settypeid(const char *origin, const char *target_type) {
         int saved = errno ? errno : EINVAL;
         posix_spawnattr_destroy(&attr);
         emit_kprobe_json(origin, "settypeid", target_type, "", target_id, -1, 0, saved);
-        return;
+        return 0;
     }
 
     char *spawn_argv[] = { (char *)"kprobe", (char *)"--noop", NULL };
@@ -159,48 +198,49 @@ static void probe_settypeid(const char *origin, const char *target_type) {
     } else {
         emit_kprobe_json(origin, "settypeid", target_type, "", target_id, -1, 0, rc);
     }
+    return 0;
 }
 
-static void probe_channel_connect(const char *origin, const char *name_spec) {
+static int probe_channel_connect(const char *origin, const char *name_spec) {
     char name_buf[256];
-    const char *name = name_spec;
-    uint32_t target_id = SECPOL_INVALID_TYPE;
+    char type_buf[128];
 
-    if (name_spec != NULL) {
-        const char *eq = strchr(name_spec, '=');
-        if (eq != NULL) {
-            size_t nlen = (size_t)(eq - name_spec);
-            if (nlen >= sizeof(name_buf)) {
-                nlen = sizeof(name_buf) - 1;
-            }
-            memcpy(name_buf, name_spec, nlen);
-            name_buf[nlen] = '\0';
-            name = name_buf;
-            const char *server_type = eq + 1;
-            if (server_type[0] != '\0') {
-                target_id = secpol_get_type_id(NULL, server_type);
-            }
-        }
+    if (parse_channel_connect_spec(
+            name_spec,
+            name_buf,
+            sizeof(name_buf),
+            type_buf,
+            sizeof(type_buf)) != 0) {
+        fprintf(
+            stderr,
+            "kprobe: malformed --connect spec '%s' (expected '<channel>=<server_type>')\n",
+            name_spec ? name_spec : "(null)"
+        );
+        fflush(stderr);
+        return -1;
     }
+
+    uint32_t target_id = secpol_get_type_id(NULL, type_buf);
 
     errno = 0;
-    int coid = name_open(name, 0);
+    int coid = name_open(name_buf, 0);
     if (coid >= 0) {
         (void)name_close(coid);
-        emit_kprobe_json(origin, "channel_connect", name, "", target_id, coid, 1, 0);
+        emit_kprobe_json(origin, "channel_connect", name_buf, "", target_id, coid, 1, 0);
     } else {
         int saved = errno ? errno : EPERM;
-        emit_kprobe_json(origin, "channel_connect", name, "", target_id, -1, 0, saved);
+        emit_kprobe_json(origin, "channel_connect", name_buf, "", target_id, -1, 0, saved);
     }
+    return 0;
 }
 
-static void probe_allow_attach(const char *origin, const char *path) {
+static int probe_allow_attach(const char *origin, const char *path) {
     errno = 0;
     dispatch_t *dpp = dispatch_create();
     if (dpp == NULL) {
         int saved = errno ? errno : ENOMEM;
         emit_kprobe_json(origin, "allow_attach", path, path, SECPOL_INVALID_TYPE, -1, 0, saved);
-        return;
+        return 0;
     }
 
     resmgr_attr_t resmgr_attr;
@@ -237,29 +277,34 @@ static void probe_allow_attach(const char *origin, const char *path) {
         dispatch_destroy(dpp);
         emit_kprobe_json(origin, "allow_attach", path, path, SECPOL_INVALID_TYPE, -1, 0, saved);
     }
+    return 0;
 }
 
-static void run_csv_probes(
+static int run_csv_probes(
     const char *origin,
     const char *csv,
-    void (*fn)(const char *, const char *)
+    int (*fn)(const char *, const char *)
 ) {
     if (csv == NULL || csv[0] == '\0') {
-        return;
+        return 0;
     }
     char *copy = strdup(csv);
     if (copy == NULL) {
-        return;
+        return -1;
     }
+    int status = 0;
     char *saveptr = NULL;
     char *tok = strtok_r(copy, ",", &saveptr);
     while (tok != NULL) {
         if (tok[0] != '\0') {
-            fn(origin, tok);
+            if (fn(origin, tok) != 0) {
+                status = -1;
+            }
         }
         tok = strtok_r(NULL, ",", &saveptr);
     }
     free(copy);
+    return status;
 }
 
 int main(int argc, char *argv[]) {
@@ -283,15 +328,18 @@ int main(int argc, char *argv[]) {
             fprintf(
                 stderr,
                 "Usage: %s [--noop] | --origin <type> "
-                "[--settypeid t1,t2] [--connect n1,n2] [--attach p1,p2]\n",
+                "[--settypeid t1,t2] [--connect n1=t1,n2=t2] [--attach p1,p2]\n",
                 argv[0]
             );
             return 2;
         }
     }
 
-    run_csv_probes(origin, settypeid_csv, probe_settypeid);
-    run_csv_probes(origin, connect_csv, probe_channel_connect);
-    run_csv_probes(origin, attach_csv, probe_allow_attach);
-    return EXIT_SUCCESS;
+    int rc = 0;
+    if (run_csv_probes(origin, settypeid_csv, probe_settypeid) != 0) rc = 1;
+    if (run_csv_probes(origin, connect_csv, probe_channel_connect) != 0) rc = 1;
+    if (run_csv_probes(origin, attach_csv, probe_allow_attach) != 0) rc = 1;
+    return rc == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }
+
+#endif /* KPROBE_HOST_TEST */

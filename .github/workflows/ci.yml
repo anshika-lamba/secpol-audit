@@ -29,6 +29,11 @@ jobs:
       - name: Run full pytest suite
         run: pytest -v
 
+      - name: Compile and run host C unit tests for kprobe spec parser
+        run: |
+          gcc -Wall -Wextra -Werror -DKPROBE_HOST_TEST -I qnx_demo -o /tmp/test_kprobe_host tests/test_kprobe_host.c
+          /tmp/test_kprobe_host
+
       - name: Verify 5/5 MATCH on real QNX 8.0 QEMU logs
         run: |
           output="$(make verify-offline)"

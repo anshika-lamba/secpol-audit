@@ -3,7 +3,7 @@
 
 CC            := qcc
 TARGET_FLAGS  ?= -Vgcc_ntox86_64
-CFLAGS        ?= -Wall -Wextra -O2
+CFLAGS        ?= -Wall -Wextra -Werror -O2
 LDFLAGS       ?= -lsecpol
 SECPOLCOMPILE ?= secpolcompile
 MKIFS         ?= mkifs
