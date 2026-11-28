@@ -1,7 +1,7 @@
 {
-  "source_commit": "306ed5b82999a0a3521ece1dcb9fb7b7503e844c",
-  "capture_date": "2026-11-28T09:39:35Z",
-  "qnx_sdp_version": "unknown",
+  "source_commit": "e628c0ffc2cc7179a7f7f9454ee3501c225c57f7",
+  "capture_date": "2026-11-28T09:57:45Z",
+  "qnx_sdp_version": "QNX SDP 8.0 (com.qnx.qnx800, GitHub Actions Run #27)",
   "qcc_version": "unknown",
   "qemu_version": "unknown",
   "build_command": "make -C qnx_demo sentry-images blast-images secpolgen-image",
@@ -17,15 +17,15 @@
   },
   "images_sha256": {},
   "evidence_logs_sha256": {
-    "blast/M0_blast_clean.log": "e995c461e4016470d5df3055aa6ee8ace5abd9195cfea9137892431fe587138b",
-    "blast/M3_blast_escalate.log": "426b67966e15097e865e9b3897c4dfc8f6d048700d6c1d612a24e807b8bfbb1b",
+    "blast/M0_blast_clean.log": "27c1c6e7b5f60c49b59107f09a1f9aace9b503bd8df25488d2a5bfe050383230",
+    "blast/M3_blast_escalate.log": "022f480e911060fda06cf890efae5900e0ada94d23b0c4edcd8e975b2bcb6022",
     "qemu_logs/M0_clean.log": "b325d184129e524bda30f7602a13aad9198827b1b58beea65711a3fe26c068be",
-    "qemu_logs/M0_sentry_clean.log": "1636dcf07e727c5693d9d6d06909170205fc100f04b659583a996557912a008c",
+    "qemu_logs/M0_sentry_clean.log": "3a550991a520056b6a0d13d3c123b650435ad0b678eb90e76ab4ce22010d573f",
     "qemu_logs/M1_no_connect.log": "c8968d32f458861f1d98cde2208cf8d3b9fd0dabf78a28a6d4a2240276d4f29c",
     "qemu_logs/M2_untyped_server.log": "3c4b754338b05c3368edf62bb167c2141143d6d933b855ae94d4142a9e9e7cc7",
     "qemu_logs/M3_2hop_escalate.log": "df7db3f5586118b3a6c2b20202d497486f4881dca4361f2c26ad05fbbd781bd3",
     "qemu_logs/M3_fixed.log": "1105161f4ec190d4bcd84a60d91ba2375cb2aff65e3e17268ebd89c70f5891d5",
-    "qemu_logs/M3_sentry_escalate.log": "fff1067a18f136437229718f63f70476c7b1b96a008cb83f938ceb5439bfe749",
+    "qemu_logs/M3_sentry_escalate.log": "4180bbf521ab366a936abc8c4a129f682ecf0a57338b40ad9d43c690200e9bf8",
     "secpolgenerate/secpolgen_capture.log": "be1494d6e7fe466aa5ece2a4fd21d8d9dd0f9e8dee020cbe74592dced8cfd3f6"
   }
 }
