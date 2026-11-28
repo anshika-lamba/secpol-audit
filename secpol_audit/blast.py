@@ -432,10 +432,13 @@ def load_expected_probes_manifest(path: Path | str) -> tuple[tuple[str, str, str
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise ParseDiagnostic("PARSE_ERROR", f"Invalid expected-probes manifest '{path}': {exc}", span) from exc
-    if not isinstance(data, dict) or not isinstance(data.get("probes"), list) or not data["probes"]:
+    if not isinstance(data, dict) or (data.get("schema_version") != 1 and data.get("version") != "1.0"):
+        raise ParseDiagnostic("PARSE_ERROR", f"Manifest '{path}' must have version '1.0' or schema_version == 1", span)
+    if not isinstance(data.get("probes"), list) or not data["probes"]:
         raise ParseDiagnostic("PARSE_ERROR", f"Manifest '{path}' must be a JSON object with non-empty 'probes' list", span)
 
     seen_ids: set[str] = set()
+    seen_tuples: set[tuple[str, str, str]] = set()
     specs: list[tuple[str, str, str]] = []
     for idx, item in enumerate(data["probes"]):
         if not isinstance(item, dict):
@@ -446,6 +449,7 @@ def load_expected_probes_manifest(path: Path | str) -> tuple[tuple[str, str, str
         target = item.get("target")
         tkind = item.get("target_kind")
         req = item.get("evidence_requirement")
+        resolved_t = item.get("resolved_target_type")
         for fname, fval in (("id", pid_str), ("origin", origin), ("target", target), ("evidence_requirement", req)):
             if not isinstance(fval, str) or not fval.strip():
                 raise ParseDiagnostic("PARSE_ERROR", f"Manifest probe[{idx}] missing non-empty '{fname}'", span)
@@ -456,7 +460,15 @@ def load_expected_probes_manifest(path: Path | str) -> tuple[tuple[str, str, str
             raise ParseDiagnostic("PARSE_ERROR", f"Manifest probe[{idx}] unsupported op '{op}'", span)
         if tkind not in VALID_TARGET_KINDS:
             raise ParseDiagnostic("PARSE_ERROR", f"Manifest probe[{idx}] invalid target_kind '{tkind}'", span)
-        specs.append((origin, op, target))
+        if req not in ("pid+ability_range", "pid+server_type_range", "pid+attach_path", "pid+exact_path", "ALLOW", "DENY", "ALLOW_OR_DENY"):
+            raise ParseDiagnostic("PARSE_ERROR", f"Manifest probe[{idx}] invalid evidence_requirement '{req}'", span)
+        if op == "channel_connect" and (not isinstance(resolved_t, str) or not resolved_t.strip()):
+            raise ParseDiagnostic("PARSE_ERROR", f"Manifest probe[{idx}] missing 'resolved_target_type' for channel_connect", span)
+        tup = (origin, op, target)
+        if tup in seen_tuples:
+            raise ParseDiagnostic("PARSE_ERROR", f"Duplicate manifest probe tuple {tup}", span)
+        seen_tuples.add(tup)
+        specs.append(tup)
     return tuple(specs)
 
 
@@ -517,15 +529,10 @@ def _find_kernel_witness(
             if len(server_types_for_target) != 1:
                 continue
             if ev.kind == "ability" and ev.ability == "channel_connect":
-                if ev.range is None:
+                if target_id is None or target_id < 0 or ev.range is None:
                     continue
-                if target_id is not None and target_id >= 0:
-                    if ev.range[0] <= target_id <= ev.range[1]:
-                        matches.append(ev)
-                elif ev.range[0] == ev.range[1]:
+                if ev.range[0] <= target_id <= ev.range[1]:
                     matches.append(ev)
-            elif ev.kind == "link" and ev.path and _name_matches_path(target, ev.path):
-                matches.append(ev)
         elif op == "allow_attach":
             if ev.kind == "attach" and ev.path and _name_matches_path(target, ev.path):
                 matches.append(ev)
@@ -766,16 +773,16 @@ def analyze_blast(
                 if (rec.origin, rec.op, rec.target) not in seen_receipt_keys:
                     seen_receipt_keys.add((rec.origin, rec.op, rec.target))
                     all_receipts.append(rec)
-                else:
-                    is_new_global = (edge.src, edge.mechanism, edge.dst) not in seen_receipt_keys
-                    for kp in matching_kps:
-                        consumed_kprobe_lines.add(kp.line)
-                        rec = _make_receipt(edge.src, edge.mechanism, "ESCALATION", edge.dst, hop, ring, kp)
-                        view_receipts.append(rec)
-                        edge_state_for_dst[dst] = rec.evidence_state
-                        if is_new_global:
-                            all_receipts.append(rec)
-                    seen_receipt_keys.add((edge.src, edge.mechanism, edge.dst))
+            else:
+                is_new_global = (edge.src, edge.mechanism, edge.dst) not in seen_receipt_keys
+                for kp in matching_kps:
+                    consumed_kprobe_lines.add(kp.line)
+                    rec = _make_receipt(edge.src, edge.mechanism, "ESCALATION", edge.dst, hop, ring, kp)
+                    view_receipts.append(rec)
+                    edge_state_for_dst[dst] = rec.evidence_state
+                    if is_new_global:
+                        all_receipts.append(rec)
+                seen_receipt_keys.add((edge.src, edge.mechanism, edge.dst))
             origin_receipt_keys.add((edge.src, edge.mechanism, edge.dst))
 
         # 2. Build direct REVIEW_ONLY IPC edge receipts
@@ -870,9 +877,7 @@ def analyze_blast(
     scoped_kprobes = [kp for kp in kprobes if not origin_filter or kp.origin == origin_filter]
     probes_completed = len(scoped_kprobes)
 
-    active_expected_specs = expected_probe_specs
-    if active_expected_specs is None and log_text is not None and expected_probes is None and not origin_filter:
-        active_expected_specs = EXPECTED_BLAST_PROBES
+    active_expected_specs = expected_probe_specs if expected_probe_specs else None
 
     missing_probes: list[tuple[str, str, str]] = []
     duplicate_probes: list[tuple[str, str, str]] = []

@@ -88,7 +88,7 @@ static void emit_kprobe_json(
     const char *op,
     const char *target,
     const char *path,
-    int target_id,
+    uint32_t target_id,
     int ret,
     int allowed,
     int err_num
@@ -106,8 +106,8 @@ static void emit_kprobe_json(
     json_escape(target ? target : "", target_esc, sizeof(target_esc));
     json_escape(path ? path : "", path_esc, sizeof(path_esc));
     json_escape(errno_to_name(effective_errno), err_name_esc, sizeof(err_name_esc));
-    if (target_id >= 0) {
-        snprintf(target_id_json, sizeof(target_id_json), "%d", target_id);
+    if (target_id != SECPOL_INVALID_TYPE) {
+        snprintf(target_id_json, sizeof(target_id_json), "%u", (unsigned int)target_id);
     } else {
         snprintf(target_id_json, sizeof(target_id_json), "null");
     }
@@ -130,11 +130,7 @@ static void emit_kprobe_json(
 }
 
 static void probe_settypeid(const char *origin, const char *target_type) {
-    int target_id = -1;
-    uint32_t tid = 0;
-    if (secpol_get_type_id(NULL, target_type, &tid) == 0) {
-        target_id = (int)tid;
-    }
+    uint32_t target_id = secpol_get_type_id(NULL, target_type);
 
     posix_spawnattr_t attr;
     if (posix_spawnattr_init(&attr) != 0) {
@@ -170,10 +166,10 @@ static void probe_channel_connect(const char *origin, const char *name) {
     int coid = name_open(name, 0);
     if (coid >= 0) {
         (void)name_close(coid);
-        emit_kprobe_json(origin, "channel_connect", name, "", -1, coid, 1, 0);
+        emit_kprobe_json(origin, "channel_connect", name, "", SECPOL_INVALID_TYPE, coid, 1, 0);
     } else {
         int saved = errno ? errno : EPERM;
-        emit_kprobe_json(origin, "channel_connect", name, "", -1, -1, 0, saved);
+        emit_kprobe_json(origin, "channel_connect", name, "", SECPOL_INVALID_TYPE, -1, 0, saved);
     }
 }
 
@@ -182,7 +178,7 @@ static void probe_allow_attach(const char *origin, const char *path) {
     dispatch_t *dpp = dispatch_create();
     if (dpp == NULL) {
         int saved = errno ? errno : ENOMEM;
-        emit_kprobe_json(origin, "allow_attach", path, path, -1, -1, 0, saved);
+        emit_kprobe_json(origin, "allow_attach", path, path, SECPOL_INVALID_TYPE, -1, 0, saved);
         return;
     }
 
@@ -214,11 +210,11 @@ static void probe_allow_attach(const char *origin, const char *path) {
     if (resmgr_id >= 0) {
         (void)resmgr_detach(dpp, resmgr_id, 0);
         dispatch_destroy(dpp);
-        emit_kprobe_json(origin, "allow_attach", path, path, -1, resmgr_id, 1, 0);
+        emit_kprobe_json(origin, "allow_attach", path, path, SECPOL_INVALID_TYPE, resmgr_id, 1, 0);
     } else {
         int saved = errno ? errno : EPERM;
         dispatch_destroy(dpp);
-        emit_kprobe_json(origin, "allow_attach", path, path, -1, -1, 0, saved);
+        emit_kprobe_json(origin, "allow_attach", path, path, SECPOL_INVALID_TYPE, -1, 0, saved);
     }
 }
 

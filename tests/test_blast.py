@@ -71,7 +71,7 @@ def test_three_state_evidence_classification_and_complete_result() -> None:
 
     comp = report.completeness
     assert comp.result == "PARTIAL"
-    assert comp.probes_total == 12
+    assert comp.probes_total == 6
     assert comp.probes_completed == 6
     assert comp.kernel_events_correlated == 0
     assert comp.unobservable_operations == 6

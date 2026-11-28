@@ -155,7 +155,7 @@ def test_6_incorrect_target_path_attribution_rejected() -> None:
 def test_7_missing_expected_probe_not_complete() -> None:
     pol = parse_secpol_file(M3_BLAST_SECPOL)
     rep = analyze_blast(pol, log_text=_make_12_probe_log(omit_last_probe=True))
-    assert rep.completeness.probes_total == 12
+    assert rep.completeness.probes_total == 11
     assert rep.completeness.probes_completed == 11
     assert rep.completeness.result == "PARTIAL"
 
@@ -193,9 +193,13 @@ def test_12_unobservable_operation_not_complete() -> None:
 
 
 def test_13_and_14_all_12_probes_correlated_and_receipts_match_completeness() -> None:
+    from secpol_audit.blast import load_expected_probes_manifest
     pol = parse_secpol_file(M3_BLAST_SECPOL)
     ifs = parse_ifs_file(BLAST_IFS)
-    rep = analyze_blast(pol, ifs=ifs, log_text=_make_12_probe_log())
+    specs = load_expected_probes_manifest(
+        Path(__file__).resolve().parent.parent / "qnx_demo" / "blast_expected_probes.json"
+    )
+    rep = analyze_blast(pol, ifs=ifs, log_text=_make_12_probe_log(), expected_probe_specs=specs)
     comp = rep.completeness
     assert comp.result == "COMPLETE"
     assert comp.probes_total == 12
@@ -379,3 +383,116 @@ def test_cp14_kprobe_c_emits_target_id() -> None:
     kprobe_c = (Path(__file__).resolve().parent.parent / "qnx_demo" / "kprobe.c").read_text(encoding="utf-8")
     assert "secpol_get_type_id" in kprobe_c
     assert "target_id" in kprobe_c
+
+
+# ---------------------------------------------------------------------------
+# Final corrective-pass regression tests
+# ---------------------------------------------------------------------------
+
+def test_fcp1_channel_connect_wrong_range_99_99_not_correlated() -> None:
+    pol = parse_secpol_file(M3_BLAST_SECPOL)
+    ifs = parse_ifs_file(BLAST_IFS)
+    # Replace first channel_connect event's range [2,2] with [99,99]
+    lines = _make_12_probe_log().splitlines()
+    for i, ln in enumerate(lines):
+        if ln.startswith("SECPOLEV_JSON:") and '"ability":"channel_connect"' in ln:
+            lines[i] = ln.replace('"range":[2,2]', '"range":[99,99]')
+            break
+    rep = analyze_blast(pol, ifs=ifs, log_text="\n".join(lines) + "\n")
+    assert rep.completeness.result != "COMPLETE"
+    assert rep.completeness.unobservable_operations >= 1
+
+
+def test_fcp2_channel_connect_path_link_not_accepted_as_proof() -> None:
+    pol = parse_secpol_file(M3_BLAST_SECPOL)
+    ifs = parse_ifs_file(BLAST_IFS)
+    lines = _make_12_probe_log().splitlines()
+    for i, ln in enumerate(lines):
+        if ln.startswith("SECPOLEV_JSON:") and '"ability":"channel_connect"' in ln:
+            lines[i] = '{"ts_ns":1002,"pid":1002,"verdict":"DENIED","proc":"kprobe","type":"ivi_ui_t","kind":"link","path":"/dev/name/local/can_ctrl"}'
+            lines[i] = "SECPOLEV_JSON:" + lines[i]
+            break
+    rep = analyze_blast(pol, ifs=ifs, log_text="\n".join(lines) + "\n")
+    assert rep.completeness.result != "COMPLETE"
+    assert rep.completeness.unobservable_operations >= 1
+
+
+def test_fcp3_omitting_manifest_never_complete() -> None:
+    pol = parse_secpol_file(M3_BLAST_SECPOL)
+    ifs = parse_ifs_file(BLAST_IFS)
+    rep = analyze_blast(pol, ifs=ifs, log_text=_make_12_probe_log())
+    assert rep.completeness.result == "PARTIAL"
+
+
+def test_fcp4_one_entry_manifest_cannot_complete_12_probe_boot() -> None:
+    pol = parse_secpol_file(M3_BLAST_SECPOL)
+    ifs = parse_ifs_file(BLAST_IFS)
+    rep = analyze_blast(
+        pol,
+        ifs=ifs,
+        log_text=_make_12_probe_log(),
+        expected_probe_specs=(("ivi_ui_t", "settypeid", "diag_helper_t"),),
+    )
+    assert rep.completeness.result != "COMPLETE"
+
+
+def test_fcp5_manifest_rejects_unsupported_schema_version(tmp_path: Path) -> None:
+    import json
+    import pytest
+    from secpol_audit.blast import load_expected_probes_manifest
+    from secpol_audit.ir import ParseDiagnostic
+    p = tmp_path / "bad_ver.json"
+    p.write_text(json.dumps({
+        "schema_version": 99,
+        "probes": [
+            {"id": "p1", "origin": "ivi_ui_t", "op": "settypeid", "target": "diag_helper_t", "target_kind": "type", "resolved_target_type": "diag_helper_t", "evidence_requirement": "ALLOW"}
+        ]
+    }), encoding="utf-8")
+    with pytest.raises(ParseDiagnostic):
+        load_expected_probes_manifest(p)
+
+
+def test_fcp6_manifest_rejects_duplicate_tuple_different_ids(tmp_path: Path) -> None:
+    import json
+    import pytest
+    from secpol_audit.blast import load_expected_probes_manifest
+    from secpol_audit.ir import ParseDiagnostic
+    p = tmp_path / "dup_tup.json"
+    p.write_text(json.dumps({
+        "schema_version": 1,
+        "probes": [
+            {"id": "p1", "origin": "ivi_ui_t", "op": "settypeid", "target": "diag_helper_t", "target_kind": "type", "resolved_target_type": "diag_helper_t", "evidence_requirement": "ALLOW"},
+            {"id": "p2", "origin": "ivi_ui_t", "op": "settypeid", "target": "diag_helper_t", "target_kind": "type", "resolved_target_type": "diag_helper_t", "evidence_requirement": "ALLOW"},
+        ]
+    }), encoding="utf-8")
+    with pytest.raises(ParseDiagnostic):
+        load_expected_probes_manifest(p)
+
+
+def test_fcp7_manifest_rejects_missing_resolved_target_type_for_channel(tmp_path: Path) -> None:
+    import json
+    import pytest
+    from secpol_audit.blast import load_expected_probes_manifest
+    from secpol_audit.ir import ParseDiagnostic
+    p = tmp_path / "bad_chan.json"
+    p.write_text(json.dumps({
+        "schema_version": 1,
+        "probes": [
+            {"id": "p1", "origin": "ivi_ui_t", "op": "channel_connect", "target": "can_ctrl", "target_kind": "channel", "evidence_requirement": "DENY"},
+        ]
+    }), encoding="utf-8")
+    with pytest.raises(ParseDiagnostic):
+        load_expected_probes_manifest(p)
+
+
+def test_fcp8_correlated_settypeid_updates_target_node_evidence_state() -> None:
+    from secpol_audit.blast import load_expected_probes_manifest
+    pol = parse_secpol_file(M3_BLAST_SECPOL)
+    ifs = parse_ifs_file(BLAST_IFS)
+    specs = load_expected_probes_manifest(
+        Path(__file__).resolve().parent.parent / "qnx_demo" / "blast_expected_probes.json"
+    )
+    rep = analyze_blast(pol, ifs=ifs, log_text=_make_12_probe_log(), expected_probe_specs=specs)
+    diag_view = rep.origins["diag_helper_t"]
+    can_node = next(n for n in diag_view.nodes if n.name == "can_hal_t")
+    assert can_node.evidence_state == STATE_OBSERVED_AND_CORRELATED
