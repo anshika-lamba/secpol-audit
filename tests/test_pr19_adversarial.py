@@ -621,3 +621,160 @@ def test_cei6_correlated_channel_connect_associated_with_review_edge(tmp_path: P
     assert len(rev_receipts) == 1
     assert rev_receipts[0].evidence_state == STATE_OBSERVED_AND_CORRELATED
     assert rev_receipts[0].syscall_outcome == "ALLOW"
+
+
+
+def test_eca1_rejects_generic_evidence_requirement(tmp_path: Path) -> None:
+    import json
+    import pytest
+    from secpol_audit.blast import load_expected_probes_manifest
+    from secpol_audit.ir import ParseDiagnostic
+
+    base = json.loads((REPO_ROOT / "qnx_demo" / "blast_expected_probes.json").read_text(encoding="utf-8"))
+    for bad_req in ("ALLOW", "DENY", "ALLOW_OR_DENY", "pid+exact_path"):
+        mut = json.loads(json.dumps(base))
+        mut["probes"][0]["evidence_requirement"] = bad_req  # probes[0] is settypeid
+        p = tmp_path / f"bad_req_{bad_req}.json"
+        p.write_text(json.dumps(mut), encoding="utf-8")
+        with pytest.raises(ParseDiagnostic):
+            load_expected_probes_manifest(p)
+
+
+def test_eca2_rejects_empty_eff_types_ghost_channel(tmp_path: Path) -> None:
+    import json
+    import pytest
+    from secpol_audit.blast import load_expected_probes_manifest
+    from secpol_audit.ir import ParseDiagnostic
+
+    pol = parse_secpol_file(M3_BLAST_SECPOL)
+    base = json.loads((REPO_ROOT / "qnx_demo" / "blast_expected_probes.json").read_text(encoding="utf-8"))
+    for item in base["probes"]:
+        if item["op"] == "channel_connect":
+            item["target"] = "ghost_unattached_chan"
+            item["resolved_target_type"] = "can_hal_t"
+            break
+    p = tmp_path / "ghost_chan.json"
+    p.write_text(json.dumps(base), encoding="utf-8")
+    with pytest.raises(ParseDiagnostic):
+        load_expected_probes_manifest(p, policy=pol)
+
+
+def test_eca3_rejects_bad_resolved_target_type_for_settypeid_and_attach(tmp_path: Path) -> None:
+    import json
+    import pytest
+    from secpol_audit.blast import load_expected_probes_manifest
+    from secpol_audit.ir import ParseDiagnostic
+
+    base = json.loads((REPO_ROOT / "qnx_demo" / "blast_expected_probes.json").read_text(encoding="utf-8"))
+
+    bad_st = json.loads(json.dumps(base))
+    bad_st["probes"][0]["resolved_target_type"] = "can_hal_t"  # target is diag_helper_t
+    p1 = tmp_path / "bad_st.json"
+    p1.write_text(json.dumps(bad_st), encoding="utf-8")
+    with pytest.raises(ParseDiagnostic):
+        load_expected_probes_manifest(p1)
+
+    bad_at = json.loads(json.dumps(base))
+    for item in bad_at["probes"]:
+        if item["op"] == "allow_attach":
+            item["resolved_target_type"] = "ivi_ui_t"
+            break
+    p2 = tmp_path / "bad_at.json"
+    p2.write_text(json.dumps(bad_at), encoding="utf-8")
+    with pytest.raises(ParseDiagnostic):
+        load_expected_probes_manifest(p2)
+
+
+def test_eca4_ifs_rejects_prefix_collision_and_unrelated_echo(tmp_path: Path) -> None:
+    import pytest
+    from secpol_audit.blast import load_expected_probes_manifest
+    from secpol_audit.ir import ParseDiagnostic
+
+    pol = parse_secpol_file(M3_BLAST_SECPOL)
+    manifest = REPO_ROOT / "qnx_demo" / "blast_expected_probes.json"
+
+    # Prefix collision: `-T can_hal_t_decoy` must NOT match `can_hal_t`
+    decoy_ifs = tmp_path / "decoy.ifs"
+    decoy_ifs.write_text(
+        "[+script] startup-script = {\n"
+        "    secpolpush /proc/boot/secpol.bin\n"
+        "    on -T can_hal_t_decoy -u 23:23 /proc/boot/can_server &\n"
+        '    echo "-T can_hal_t"\n'
+        "    on -T ivi_ui_t /proc/boot/kprobe --origin ivi_ui_t --connect can_ctrl=can_hal_t\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    ifs = parse_ifs_file(decoy_ifs)
+    with pytest.raises(ParseDiagnostic):
+        load_expected_probes_manifest(manifest, policy=pol, ifs=ifs)
+
+
+def test_eca5_ifs_accepts_valid_allow_attach_channel_type_override(tmp_path: Path) -> None:
+    import json
+    from secpol_audit.blast import load_expected_probes_manifest
+
+    pol_p = tmp_path / "override_full.secpol"
+    pol_p.write_text(
+        "type srv_proc_t;\n"
+        "type chan_override_t;\n"
+        "type ivi_ui_t;\n"
+        "type diag_helper_t;\n"
+        "type audit_reader_t;\n"
+        "allow_attach srv_proc_t /dev/name/local/can_ctrl chan_override_t;\n"
+        "allow audit_reader_t chan_override_t:channel connect;\n",
+        encoding="utf-8",
+    )
+    pol = parse_secpol_file(pol_p)
+    base = json.loads((REPO_ROOT / "qnx_demo" / "blast_expected_probes.json").read_text(encoding="utf-8"))
+    for item in base["probes"]:
+        if item["op"] == "channel_connect":
+            item["resolved_target_type"] = "chan_override_t"
+        elif item["op"] == "settypeid" and item["target"] == "can_hal_t":
+            item["target"] = "srv_proc_t"
+            item["resolved_target_type"] = "srv_proc_t"
+    m_p = tmp_path / "override_manifest.json"
+    m_p.write_text(json.dumps(base), encoding="utf-8")
+
+    ifs_p = tmp_path / "override.ifs"
+    ifs_p.write_text(
+        "[+script] startup-script = {\n"
+        "    secpolpush /proc/boot/secpol.bin\n"
+        "    on -T srv_proc_t -u 23:23 /proc/boot/can_server &\n"
+        "    on -T ivi_ui_t /proc/boot/kprobe --origin ivi_ui_t --connect can_ctrl=chan_override_t\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    ifs = parse_ifs_file(ifs_p)
+    specs = load_expected_probes_manifest(m_p, policy=pol, ifs=ifs)
+    assert len(specs) == 12
+
+
+def test_eca6_ifs_rejects_malformed_or_contradictory_kprobe_connect_spec(tmp_path: Path) -> None:
+    import pytest
+    from secpol_audit.blast import load_expected_probes_manifest
+    from secpol_audit.ir import ParseDiagnostic
+
+    pol = parse_secpol_file(M3_BLAST_SECPOL)
+    manifest = REPO_ROOT / "qnx_demo" / "blast_expected_probes.json"
+
+    bad_ifs = tmp_path / "bad_connect.ifs"
+    bad_ifs.write_text(
+        "[+script] startup-script = {\n"
+        "    secpolpush /proc/boot/secpol.bin\n"
+        "    on -T can_hal_t -u 23:23 /proc/boot/can_server &\n"
+        "    on -T ivi_ui_t /proc/boot/kprobe --origin ivi_ui_t --connect can_ctrl=diag_helper_t\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ParseDiagnostic):
+        load_expected_probes_manifest(manifest, policy=pol, ifs=parse_ifs_file(bad_ifs))
+
+
+def test_eca7_rejects_truncated_secpolev_stream_count_mismatch() -> None:
+    pol = parse_secpol_file(M3_BLAST_SECPOL)
+    log = _make_12_probe_log().replace(
+        "SECPOLEV_STATS: ok=12 denied=0 dropped=0",
+        "SECPOLEV_STATS: ok=15 denied=5 dropped=0",
+    )
+    rep = analyze_blast(pol, log_text=log, expected_probe_specs=EXPECTED_BLAST_PROBES)
+    assert rep.completeness.result == "PARTIAL"

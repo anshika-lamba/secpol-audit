@@ -80,6 +80,8 @@ static sentry_state_t g_state;
 static volatile sig_atomic_t g_stop = 0;
 static bool g_secpolev_initialized = false;
 static bool g_secpolev_shutdown_done = false;
+static bool g_collector_tid_valid = false;
+static pthread_t g_collector_tid;
 static pthread_mutex_t g_shutdown_lock = PTHREAD_MUTEX_INITIALIZER;
 static secpol_permission_t *g_read_perm = NULL;
 static int g_self_coid = -1;
@@ -153,7 +155,11 @@ static void request_secpolev_shutdown(void) {
     pthread_mutex_lock(&g_shutdown_lock);
     if (g_secpolev_initialized && !g_secpolev_shutdown_done) {
         g_secpolev_shutdown_done = true;
-        secpolev_shutdown(true);
+        secpolev_shutdown_type_t mode =
+            (g_collector_tid_valid && pthread_equal(pthread_self(), g_collector_tid))
+                ? SECPOLEV_SHUTDOWN_IMMEDIATE
+                : SECPOLEV_SHUTDOWN_NOWAIT;
+        secpolev_shutdown(mode);
     }
     pthread_mutex_unlock(&g_shutdown_lock);
 }
@@ -234,6 +240,8 @@ static void *secpolev_collector_thread(void *arg) {
     }
 
     pthread_mutex_lock(&g_shutdown_lock);
+    g_collector_tid = pthread_self();
+    g_collector_tid_valid = true;
     g_secpolev_initialized = true;
     pthread_mutex_unlock(&g_shutdown_lock);
 

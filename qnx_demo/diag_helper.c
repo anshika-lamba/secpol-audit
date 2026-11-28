@@ -32,7 +32,14 @@ int main(int argc, char **argv) {
     fflush(stdout);
 
     posix_spawnattr_t attr;
-    posix_spawnattr_init(&attr);
+    if (posix_spawnattr_init(&attr) != 0) {
+        int err = errno ? errno : EINVAL;
+        printf("HOP2_SPAWN=DENIED errno=%d (%s)\n", err, strerror(err));
+        printf("LINEAGE_HOP2:{\"parent_pid\":%d,\"child_pid\":-1,\"origin_type\":\"%s\",\"requested_target_type\":\"%s\",\"outcome\":\"DENIED\",\"errno\":%d}\n",
+               (int)parent_pid, origin_type, target_type, err);
+        fflush(stdout);
+        return 1;
+    }
     if (secpol_posix_spawnattr_settypeid(NULL, &attr, target_type, SECPOL_TYPE_NAME) == -1) {
         int err = errno;
         printf("HOP2_SPAWN=DENIED errno=%d (%s)\n", err, strerror(err));
