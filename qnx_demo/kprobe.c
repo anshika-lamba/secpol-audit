@@ -91,10 +91,19 @@ static int parse_channel_connect_spec(
     if (eq == NULL) {
         return -1;
     }
-    size_t nlen = (size_t)(eq - name_spec);
     const char *server_type = eq + 1;
+    if (strchr(server_type, '=') != NULL) {
+        return -1;
+    }
+    size_t nlen = (size_t)(eq - name_spec);
     size_t tlen = strlen(server_type);
     if (nlen == 0 || tlen == 0 || nlen >= name_buf_size || tlen >= type_buf_size) {
+        return -1;
+    }
+    if (name_spec[0] == ' ' || name_spec[0] == '\t' ||
+        name_spec[nlen - 1] == ' ' || name_spec[nlen - 1] == '\t' ||
+        server_type[0] == ' ' || server_type[0] == '\t' ||
+        server_type[tlen - 1] == ' ' || server_type[tlen - 1] == '\t') {
         return -1;
     }
     memcpy(name_buf, name_spec, nlen);
@@ -172,9 +181,9 @@ static int probe_settypeid(const char *origin, const char *target_type) {
     uint32_t target_id = secpol_get_type_id(NULL, target_type);
 
     posix_spawnattr_t attr;
-    if (posix_spawnattr_init(&attr) != 0) {
-        int saved = errno ? errno : EINVAL;
-        emit_kprobe_json(origin, "settypeid", target_type, "", target_id, -1, 0, saved);
+    int init_rc = posix_spawnattr_init(&attr);
+    if (init_rc != 0) {
+        emit_kprobe_json(origin, "settypeid", target_type, "", target_id, -1, 0, init_rc);
         return 0;
     }
 
@@ -193,8 +202,16 @@ static int probe_settypeid(const char *origin, const char *target_type) {
 
     if (rc == 0) {
         int status = 0;
-        (void)waitpid(child_pid, &status, 0);
-        emit_kprobe_json(origin, "settypeid", target_type, "", target_id, 0, 1, 0);
+        pid_t wr;
+        do {
+            wr = waitpid(child_pid, &status, 0);
+        } while (wr == -1 && errno == EINTR);
+        if (wr == child_pid && WIFEXITED(status) && WEXITSTATUS(status) == 0) {
+            emit_kprobe_json(origin, "settypeid", target_type, "", target_id, 0, 1, 0);
+        } else {
+            int werr = (wr == -1 && errno) ? errno : ECHILD;
+            emit_kprobe_json(origin, "settypeid", target_type, "", target_id, -1, 0, werr);
+        }
     } else {
         emit_kprobe_json(origin, "settypeid", target_type, "", target_id, -1, 0, rc);
     }
@@ -225,7 +242,7 @@ static int probe_channel_connect(const char *origin, const char *name_spec) {
     errno = 0;
     int coid = name_open(name_buf, 0);
     if (coid >= 0) {
-        (void)name_close(coid);
+        if (name_close(coid) == -1) { fprintf(stderr, "kprobe: name_close(%s) failed errno=%d\n", name_buf, errno); }
         emit_kprobe_json(origin, "channel_connect", name_buf, "", target_id, coid, 1, 0);
     } else {
         int saved = errno ? errno : EPERM;
@@ -269,7 +286,7 @@ static int probe_allow_attach(const char *origin, const char *path) {
         NULL
     );
     if (resmgr_id >= 0) {
-        (void)resmgr_detach(dpp, resmgr_id, 0);
+        if (resmgr_detach(dpp, resmgr_id, 0) == -1) { fprintf(stderr, "kprobe: resmgr_detach(%s) failed errno=%d\n", path, errno); }
         dispatch_destroy(dpp);
         emit_kprobe_json(origin, "allow_attach", path, path, SECPOL_INVALID_TYPE, resmgr_id, 1, 0);
     } else {

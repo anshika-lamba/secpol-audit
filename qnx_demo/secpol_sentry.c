@@ -80,6 +80,7 @@ static sentry_state_t g_state;
 static volatile sig_atomic_t g_stop = 0;
 static bool g_secpolev_initialized = false;
 static bool g_secpolev_shutdown_done = false;
+static bool g_sentry_runtime_error = false;
 static bool g_collector_tid_valid = false;
 static pthread_t g_collector_tid;
 static pthread_mutex_t g_shutdown_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -159,7 +160,11 @@ static void request_secpolev_shutdown(void) {
             (g_collector_tid_valid && pthread_equal(pthread_self(), g_collector_tid))
                 ? SECPOLEV_SHUTDOWN_IMMEDIATE
                 : SECPOLEV_SHUTDOWN_NOWAIT;
-        secpolev_shutdown(mode);
+        if (secpolev_shutdown(mode) != 0) {
+            g_sentry_runtime_error = true;
+            fprintf(stderr, "SECPOLEV_SHUTDOWN=FAILED errno=%d (%s)\n", errno, strerror(errno));
+            fflush(stderr);
+        }
     }
     pthread_mutex_unlock(&g_shutdown_lock);
 }
@@ -581,7 +586,7 @@ static int run_read_probe(const char *label) {
     close(fd);
     printf("%s=OK bytes=%zd\n", label, total);
     fflush(stdout);
-    return EXIT_SUCCESS;
+    return g_sentry_runtime_error ? EXIT_FAILURE : EXIT_SUCCESS;
 }
 
 int main(int argc, char *argv[]) {
@@ -665,8 +670,64 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
-    pulse_attach(dpp, 0, PULSE_CODE_SHUTDOWN, pulse_shutdown_handler, NULL);
+    if (pulse_attach(dpp, 0, PULSE_CODE_SHUTDOWN, pulse_shutdown_handler, NULL) == -1) {
+        fprintf(stderr, "SENTRY_PULSE_ATTACH=FAILED errno=%d (%s)\n", errno, strerror(errno));
+        fflush(stderr);
+        (void)resmgr_detach(dpp, resmgr_id, 0);
+        dispatch_destroy(dpp);
+        return EXIT_FAILURE;
+    }
     g_self_coid = message_connect(dpp, MSG_FLAG_SIDE_CHANNEL);
+    if (g_self_coid == -1) {
+        fprintf(stderr, "SENTRY_MSG_CONNECT=FAILED errno=%d (%s)\n", errno, strerror(errno));
+        fflush(stderr);
+        (void)resmgr_detach(dpp, resmgr_id, 0);
+        dispatch_destroy(dpp);
+        return EXIT_FAILURE;
+    }
+
+    pthread_t collector_tid;
+    int collector_rc = pthread_create(&collector_tid, NULL, secpolev_collector_thread, NULL);
+    if (collector_rc != 0) {
+        fprintf(stderr, "SENTRY_THREAD=FAILED err=%d (%s)\n", collector_rc, strerror(collector_rc));
+        fflush(stderr);
+        (void)ConnectDetach(g_self_coid);
+        (void)resmgr_detach(dpp, resmgr_id, 0);
+        dispatch_destroy(dpp);
+        return EXIT_FAILURE;
+    }
+
+    pthread_t timer_tid;
+    bool timer_started = false;
+    if (g_timeout_sec > 0) {
+        int timer_rc = pthread_create(&timer_tid, NULL, timeout_watchdog_thread, &g_timeout_sec);
+        if (timer_rc != 0) {
+            fprintf(stderr, "SENTRY_WATCHDOG=FAILED err=%d (%s)\n", timer_rc, strerror(timer_rc));
+            fflush(stderr);
+            trigger_shutdown();
+            (void)pthread_join(collector_tid, NULL);
+            (void)ConnectDetach(g_self_coid);
+            (void)resmgr_detach(dpp, resmgr_id, 0);
+            dispatch_destroy(dpp);
+            return EXIT_FAILURE;
+        }
+        timer_started = true;
+    }
+
+    dispatch_context_t *ctp = dispatch_context_alloc(dpp);
+    if (ctp == NULL) {
+        fprintf(stderr, "SENTRY_DISPATCH_CTX=FAILED errno=%d (%s)\n", errno, strerror(errno));
+        fflush(stderr);
+        trigger_shutdown();
+        (void)pthread_join(collector_tid, NULL);
+        if (timer_started) {
+            (void)pthread_join(timer_tid, NULL);
+        }
+        (void)ConnectDetach(g_self_coid);
+        (void)resmgr_detach(dpp, resmgr_id, 0);
+        dispatch_destroy(dpp);
+        return EXIT_FAILURE;
+    }
 
     printf("SENTRY_READY pid=%d path=%s\n", (int)getpid(), SENTRY_DEV_PATH);
     {
@@ -679,40 +740,27 @@ int main(int argc, char *argv[]) {
     }
     fflush(stdout);
 
-    pthread_t collector_tid;
-    bool collector_started = (pthread_create(&collector_tid, NULL, secpolev_collector_thread, NULL) == 0);
-    if (!collector_started) {
-        fprintf(stderr, "SENTRY_THREAD=FAILED errno=%d\n", errno);
-        fflush(stderr);
-    }
-
-    pthread_t timer_tid;
-    bool timer_started = false;
-    if (g_timeout_sec > 0) {
-        timer_started = (pthread_create(&timer_tid, NULL, timeout_watchdog_thread, &g_timeout_sec) == 0);
-    }
-
-    dispatch_context_t *ctp = dispatch_context_alloc(dpp);
-    if (ctp != NULL) {
-        while (!g_stop) {
-            if (dispatch_block(ctp) == NULL) {
-                if (errno == EINTR) {
-                    continue;
-                }
-                break;
+    while (!g_stop) {
+        if (dispatch_block(ctp) == NULL) {
+            if (errno == EINTR) {
+                continue;
             }
-            dispatch_handler(ctp);
+            g_sentry_runtime_error = true;
+            fprintf(stderr, "SENTRY_DISPATCH_BLOCK=FAILED errno=%d (%s)\n", errno, strerror(errno));
+            fflush(stderr);
+            break;
         }
-        dispatch_context_free(ctp);
+        dispatch_handler(ctp);
     }
+    dispatch_context_free(ctp);
 
     /* Ensure collector exits cleanly and print final statistics */
     request_secpolev_shutdown();
-    if (collector_started) {
-        pthread_join(collector_tid, NULL);
+    if (pthread_join(collector_tid, NULL) != 0) {
+        g_sentry_runtime_error = true;
     }
-    if (timer_started) {
-        pthread_join(timer_tid, NULL);
+    if (timer_started && pthread_join(timer_tid, NULL) != 0) {
+        g_sentry_runtime_error = true;
     }
 
     unsigned long long dropped = g_secpolev_initialized

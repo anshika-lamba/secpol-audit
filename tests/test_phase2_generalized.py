@@ -150,3 +150,76 @@ def test_p2_4_adas_16_probe_channel_override_boot_reaches_complete() -> None:
     assert rep.completeness.probes_completed == 16
     assert rep.completeness.kernel_events_correlated == 16
     assert rep.completeness.kernel_policy_id == 7
+
+
+def test_p2_5_real_committed_adas_12svc_logs_complete_with_policy_ids() -> None:
+    ifs = parse_ifs_file(ADAS_IFS)
+    for pol_path, log_name, exp_pid in (
+        (ADAS_VULN, "ADAS_12svc_blast.log", 2418320052),
+        (ADAS_FIXED, "ADAS_12svc_fixed_blast.log", 3119197131),
+    ):
+        pol = parse_secpol_file(pol_path)
+        specs = load_expected_probes_manifest(ADAS_MANIFEST, policy=pol, ifs=ifs)
+        log_p = REPO_ROOT / "evidence" / "adas_blast" / log_name
+        rep = analyze_blast(
+            pol,
+            ifs=ifs,
+            log_text=log_p.read_text(encoding="utf-8", errors="replace"),
+            log_path=str(log_p),
+            expected_probe_specs=specs,
+            expected_policy_id=exp_pid,
+        )
+        c = rep.completeness
+        assert c.result == "COMPLETE"
+        assert c.probes_total == 16
+        assert c.probes_completed == 16
+        assert c.kernel_events_correlated == 16
+        assert c.unobservable_operations == 0
+        assert c.dropped_events == 0
+        assert c.mismatches == 0
+        assert c.kernel_policy_id == exp_pid
+
+
+def test_p2_6_synthetic_fixture_marker_never_reaches_complete() -> None:
+    from tests.test_pr19_adversarial import _make_12_probe_log
+    pol = parse_secpol_file(M3_BLAST)
+    ifs = parse_ifs_file(BLAST_IFS)
+    log = "# SYNTHETIC_FIXTURE\n" + _make_12_probe_log()
+    rep = analyze_blast(pol, ifs=ifs, log_text=log, expected_probe_specs=EXPECTED_BLAST_PROBES)
+    assert rep.completeness.result == "PARTIAL"
+
+
+def test_p2_7_channel_connect_enoent_is_unavailable_not_complete() -> None:
+    from tests.test_pr19_adversarial import _make_12_probe_log
+    pol = parse_secpol_file(M3_BLAST)
+    ifs = parse_ifs_file(BLAST_IFS)
+    # Turn one channel_connect DENY errno=1 into errno=2 (ENOENT = server unavailable)
+    log = _make_12_probe_log().replace(
+        '"op":"channel_connect","target":"can_ctrl","pid":1002,"target_id":2,"ret":-1,"outcome":"DENY","errno":1',
+        '"op":"channel_connect","target":"can_ctrl","pid":1002,"target_id":2,"ret":-1,"outcome":"DENY","errno":2',
+        1,
+    )
+    rep = analyze_blast(pol, ifs=ifs, log_text=log, expected_probe_specs=EXPECTED_BLAST_PROBES)
+    assert rep.completeness.result == "PARTIAL"
+
+
+def test_p2_8_conflicting_policy_id_and_trailing_events_fail_closed() -> None:
+    from tests.test_pr19_adversarial import _make_12_probe_log
+    pol = parse_secpol_file(M3_BLAST)
+    ifs = parse_ifs_file(BLAST_IFS)
+    # Conflicting SECPOLEV_POLICY_ID lines
+    log_conflict = "SECPOLEV_POLICY_ID: 42\nSECPOLEV_POLICY_ID: 99\n" + _make_12_probe_log()
+    rep_c = analyze_blast(pol, ifs=ifs, log_text=log_conflict, expected_probe_specs=EXPECTED_BLAST_PROBES)
+    assert rep_c.completeness.result == "PARTIAL"
+
+    # Event appearing after final SECPOLEV_STATS
+    log_trail = _make_12_probe_log() + 'SECPOLEV_JSON:{"ts_ns":9999,"pid":9999,"verdict":"OK","proc":"kprobe","type":"ivi_ui_t","kind":"ability","ability":"settypeid","root":false,"range":[4,4]}\n'
+    rep_t = analyze_blast(pol, ifs=ifs, log_text=log_trail, expected_probe_specs=EXPECTED_BLAST_PROBES)
+    assert rep_t.completeness.result == "PARTIAL"
+
+
+def test_p2_9_inconsistent_kprobe_allow_with_nonzero_errno_raises() -> None:
+    from secpol_audit.blast import parse_blast_log_text
+    bad_log = 'KPROBE_JSON:{"origin":"ivi_ui_t","op":"settypeid","target":"diag_helper_t","pid":1000,"target_id":4,"ret":-1,"outcome":"ALLOW","errno":1}\n'
+    with pytest.raises(ParseDiagnostic):
+        parse_blast_log_text(bad_log)

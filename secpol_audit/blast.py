@@ -310,10 +310,9 @@ def parse_blast_log_text(
         ):
             has_secpolev = True
 
-        if KPROBE_JSON_PREFIX in line:
-            idx = line.find(KPROBE_JSON_PREFIX)
-            payload_str = line[idx + len(KPROBE_JSON_PREFIX) :].strip()
-            span = SourceSpan(file=source_path, line=line_no, col=idx + 1, snippet=line)
+        if line.startswith(KPROBE_JSON_PREFIX):
+            payload_str = line[len(KPROBE_JSON_PREFIX) :].strip()
+            span = SourceSpan(file=source_path, line=line_no, col=1, snippet=line)
             try:
                 obj = json.loads(payload_str)
             except json.JSONDecodeError as exc:
@@ -360,6 +359,15 @@ def parse_blast_log_text(
                 )
             if not isinstance(err_num, int) or isinstance(err_num, bool) or err_num < 0:
                 raise ParseDiagnostic("PARSE_ERROR", f"Invalid KPROBE_JSON errno '{err_num}'", span)
+            if outcome == "ALLOW" and (
+                err_num != 0
+                or (isinstance(ret_val, int) and not isinstance(ret_val, bool) and ret_val < 0)
+            ):
+                raise ParseDiagnostic(
+                    "PARSE_ERROR",
+                    f"Inconsistent KPROBE_JSON ALLOW with ret={ret_val} errno={err_num}",
+                    span,
+                )
             classification: str | None = None
             classification_reason: str | None = None
             if op == "allow_attach":
@@ -368,6 +376,10 @@ def parse_blast_log_text(
                     err_num,
                     outcome,
                 )
+            elif op == "channel_connect" and outcome == "DENY" and err_num == 2:
+                # ENOENT means the target server/channel was absent, not a policy denial
+                classification = "UNAVAILABLE"
+                classification_reason = "SERVER_NOT_FOUND"
             kprobes.append(
                 KprobeRecord(
                     origin=origin,
@@ -654,14 +666,19 @@ def extract_ifs_scheduled_probes(ifs: IfsIR) -> tuple[tuple[str, str, str], ...]
 
 
 def _extract_kernel_policy_id(log_text: str) -> int | None:
-    """Extract QNX 8.0 `SECPOLEV_POLICY_ID: <uint32>` emitted by `secpol_get_policy_id()`."""
+    """Extract QNX 8.0 `SECPOLEV_POLICY_ID: <uint32>`; return 0 (fail-closed) on conflicting IDs."""
     import re
     pid_re = re.compile(r"^SECPOLEV_POLICY_ID:\s*(\d+)\b")
+    found: set[int] = set()
     for raw_line in log_text.splitlines():
         m = pid_re.match(raw_line.rstrip("\r\n"))
         if m:
-            return int(m.group(1))
-    return None
+            found.add(int(m.group(1)))
+    if not found:
+        return None
+    if len(found) > 1:
+        return 0
+    return next(iter(found))
 
 
 def generate_expected_probes_manifest(
@@ -792,18 +809,34 @@ def generate_expected_probes_manifest(
 
 
 def _has_valid_post_marker_stats(log_text: str) -> bool:
-    """Return True iff `=== SECPOL_AUDIT_DONE ===` is present AND a strict `SECPOLEV_STATS:` follows it."""
+    """Return True iff exactly one DONE marker is followed by exactly one strict SECPOLEV_STATS and no trailing events."""
     import re
     stats_re = re.compile(r"^SECPOLEV_STATS:\s*ok=\d+\s+denied=\d+\s+dropped=\d+\s*$")
-    seen_done = False
+    done_count = 0
+    stats_before_done = 0
+    stats_after_done = 0
+    events_after_stats = 0
     for raw_line in log_text.splitlines():
         line = raw_line.rstrip("\r\n")
         if "=== SECPOL_AUDIT_DONE ===" in line:
-            seen_done = True
+            done_count += 1
             continue
-        if seen_done and stats_re.match(line):
-            return True
-    return False
+        if stats_re.match(line):
+            if done_count == 0:
+                stats_before_done += 1
+            else:
+                stats_after_done += 1
+            continue
+        if stats_after_done > 0 and (
+            line.startswith(KPROBE_JSON_PREFIX) or line.startswith(SECPOLEV_JSON_PREFIX)
+        ):
+            events_after_stats += 1
+    return (
+        done_count == 1
+        and stats_before_done == 0
+        and stats_after_done == 1
+        and events_after_stats == 0
+    )
 
 
 def _find_kernel_witness(
@@ -1228,7 +1261,7 @@ def analyze_blast(
     mismatch_count = 0
     inconclusive_count = 0
     for kp in scoped_kprobes:
-        if kp.op == "allow_attach" and kp.classification in ("INCONCLUSIVE", "SETUP_FAILURE"):
+        if kp.classification in ("INCONCLUSIVE", "SETUP_FAILURE", "UNAVAILABLE"):
             inconclusive_count += 1
         else:
             static_pred, _ = _static_prediction_for_op(
@@ -1251,7 +1284,7 @@ def analyze_blast(
     ifs_scheduled = extract_ifs_scheduled_probes(ifs) if ifs is not None else ()
     manifest_covers_ifs = (
         active_expected_specs is not None
-        and (not ifs_scheduled or set(ifs_scheduled).issubset(set(active_expected_specs)))
+        and (not ifs_scheduled or set(ifs_scheduled) == set(active_expected_specs))
     )
     has_explicit_manifest = (
         active_expected_specs is not None
@@ -1278,6 +1311,7 @@ def analyze_blast(
         comp_result = "MISMATCH"
     elif (
         log_text is not None
+        and not (parsed_events is not None and parsed_events.is_synthetic_fixture)
         and has_explicit_manifest
         and has_valid_stats
         and policy_id_valid

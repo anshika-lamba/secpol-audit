@@ -32,7 +32,7 @@ Compile `codelab/starter/minimal_resmgr.c` with `qcc`:
 make -C codelab/starter minimal_resmgr
 ```
 
-On a host without QNX SDP 8.0, you can syntax-check with:
+On a host without QNX SDP 8.0, you can run a host stub smoke-test build (note: this compiles only the non-`__QNXNTO__` host branch; `qcc` above is required to compile the QNX resource-manager code):
 
 ```bash
 gcc -Wall -Wextra -Werror -O2 codelab/starter/minimal_resmgr.c -o /tmp/minimal_resmgr && /tmp/minimal_resmgr
@@ -102,6 +102,7 @@ Run `secpol-audit check` and `secpol-audit blast` on the vulnerable policy + ser
 secpol-audit check codelab/starter/vulnerable.secpol
 secpol-audit blast qnx_demo/mutants/M3_blast_escalate.secpol \
   --ifs qnx_demo/build_blast.ifs.in \
+  --expected-probes-file qnx_demo/blast_expected_probes.json \
   --log evidence/blast/M3_blast_escalate.log
 ```
 

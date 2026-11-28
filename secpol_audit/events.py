@@ -21,7 +21,7 @@ from secpol_audit.ir import (
 )
 from secpol_audit.paths import analyze_paths, collect_type_abilities, collect_type_attaches
 
-SYNTHETIC_MARKER_RE = re.compile(r"SYNTHETIC\s+(?:UNIT-TEST\s+)?FIXTURE", re.IGNORECASE)
+SYNTHETIC_MARKER_RE = re.compile(r"SYNTHETIC[\s_]+(?:UNIT[-_]TEST[\s_]+)?FIXTURE", re.IGNORECASE)
 SECPOLEV_JSON_PREFIX = "SECPOLEV_JSON:"
 SECPOLEV_ALERT_PREFIX = "SECPOLEV_ALERT:"
 SECPOLEV_STATS_RE = re.compile(

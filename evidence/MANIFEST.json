@@ -1,11 +1,13 @@
 {
-  "source_commit": "e628c0ffc2cc7179a7f7f9454ee3501c225c57f7",
-  "capture_date": "2026-11-28T09:57:45Z",
-  "qnx_sdp_version": "QNX SDP 8.0 (com.qnx.qnx800, GitHub Actions Run #27)",
+  "source_commit": "d75a632b0ee49052ce80e0c42b19900043417ce1",
+  "capture_date": "2026-11-28T10:42:30Z",
+  "qnx_sdp_version": "QNX SDP 8.0 (com.qnx.qnx800, GitHub Actions Run #29)",
   "qcc_version": "unknown",
   "qemu_version": "unknown",
-  "build_command": "make -C qnx_demo sentry-images blast-images secpolgen-image",
+  "build_command": "make -C qnx_demo sentry-images blast-images adas-blast-images secpolgen-image",
   "policies_sha256": {
+    "ADAS_12svc_blast.secpol": "a5759f03316d4b4568a07a1752b1ecae23febd8f82f6897de20ac82433722825",
+    "ADAS_12svc_fixed_blast.secpol": "690c27ae01832a9664a60d2f8ae41cac0171ecbe62fa01b78dc4566b670895a8",
     "M0_blast_clean.secpol": "e39d1656db194638d8cc02047fc169a9558d5fae1438921279e6ef9c9436f6ee",
     "M0_clean.secpol": "f87318679e30ddddedd7258fb18890e617223c464380c87bdff7b946200c6159",
     "M0_sentry_clean.secpol": "77c9b135166491777ed1e179c1f1f87950d5d47c3d7857489b818550b3df8a10",
@@ -17,6 +19,8 @@
   },
   "images_sha256": {},
   "evidence_logs_sha256": {
+    "adas_blast/ADAS_12svc_blast.log": "caa7abfa86635333d443fd6e53fb5aed5f386051ea9ebe5717d502be1a91b090",
+    "adas_blast/ADAS_12svc_fixed_blast.log": "9c161d217e9c9af5e2c467ffa653e43a255916af01a0bd82fffd1fcd0e28354f",
     "blast/M0_blast_clean.log": "27c1c6e7b5f60c49b59107f09a1f9aace9b503bd8df25488d2a5bfe050383230",
     "blast/M3_blast_escalate.log": "022f480e911060fda06cf890efae5900e0ada94d23b0c4edcd8e975b2bcb6022",
     "qemu_logs/M0_clean.log": "b325d184129e524bda30f7602a13aad9198827b1b58beea65711a3fe26c068be",

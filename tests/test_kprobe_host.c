@@ -25,6 +25,9 @@ int main(void) {
     assert(parse_channel_connect_spec("=can_hal_t", name_buf, sizeof(name_buf), type_buf, sizeof(type_buf)) == -1);
     assert(parse_channel_connect_spec("can_ctrl=", name_buf, sizeof(name_buf), type_buf, sizeof(type_buf)) == -1);
     assert(parse_channel_connect_spec("=", name_buf, sizeof(name_buf), type_buf, sizeof(type_buf)) == -1);
+    assert(parse_channel_connect_spec("can_ctrl=can_hal_t=extra", name_buf, sizeof(name_buf), type_buf, sizeof(type_buf)) == -1);
+    assert(parse_channel_connect_spec(" can_ctrl=can_hal_t", name_buf, sizeof(name_buf), type_buf, sizeof(type_buf)) == -1);
+    assert(parse_channel_connect_spec("can_ctrl=can_hal_t ", name_buf, sizeof(name_buf), type_buf, sizeof(type_buf)) == -1);
 
     /* Oversized channel name or server type must be rejected, not silently truncated */
     char big_spec[400];

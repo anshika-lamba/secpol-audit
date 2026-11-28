@@ -37,9 +37,10 @@ QNX Neutrino 8.0 enforces least privilege through security policies (`.secpol`),
   - **Nested two-hop exploit boot (`qnx_demo/build_sentry.ifs.in`):** Runs `secpol_sentry` alongside `ivi_exploit` -> `diag_helper` -> `can_hal_t`:
     - Under vulnerable `M3_sentry_escalate.secpol`: `ivi_exploit` (`pid=16388`) transitions to `diag_helper` (`pid=20485`), which transitions to `can_hal_t` (`pid=20486`) and opens `can_ctrl` (`HOP2_RESULT=GRANTED`).
     - Under hardened `M0_sentry_clean.secpol`: `HOP1_SPAWN=DENIED` blocks the chain at the first hop.
-  - **Independent per-edge probe boot (`qnx_demo/build_blast.ifs.in` + `qnx_demo/kprobe.c`):** Exercises each `(origin, op, target)` edge independently—including fresh-path `secpol_resmgr_attach()` (`ALLOW` `errno=0` on `/dev/secpol_probe_allow` and `EACCES` `errno=13` on `/dev/secpol_probe_deny_<origin>`)—while `secpol_sentry` records PID-tagged `SECPOLEV_JSON:` events.
+  - **Independent per-edge probe boot (`qnx_demo/build_blast.ifs.in` + `qnx_demo/kprobe.c`):** Exercises each `(origin, op, target)` edge independently—including fresh-path `secpol_resmgr_attach()` (`ALLOW` `errno=0` on `/dev/secpol_probe_allow` and `EACCES` `errno=13` on `/dev/secpol_probe_deny_<origin>`)—while `secpol_sentry` records PID-tagged `SECPOLEV_JSON:` events and live kernel policy provenance via `secpol_get_policy_id()` (`SECPOLEV_POLICY_ID:`).
+  - **12-type ADAS security policy model channel-override verification (`qnx_demo/build_adas_blast.ifs.in` + `ADAS_12svc_blast.secpol` / `ADAS_12svc_fixed_blast.secpol`):** Verifies 16/16 probes (`COMPLETE`) across 4 origins with an explicit QNX 8.0 channel-type override (`allow_attach can_hal_t /dev/name/local/can_ctrl can_chan_t;`) and distinct live kernel policy IDs (`2418320052` vulnerable vs. `3119197131` remediated).
 - **On the host (Python 3.10+, stdlib-only):**
-  - `secpol_audit` parses `.secpol` and `.ifs` files, builds the static escalation graph, correlates `KPROBE_JSON:` + `LINEAGE_HOP*` + `SECPOLEV_JSON:` telemetry, computes `EvidenceCompleteness`, and renders SARIF 2.1.0, JSON, and offline HTML reports (`docs/index.html`).
+  - `secpol_audit` parses `.secpol` and `.ifs` files, auto-generates expected-probe manifests and IFS snippets for any policy (`secpol-audit generate-probes`), builds the static escalation graph, correlates `KPROBE_JSON:` + `LINEAGE_HOP*` + `SECPOLEV_JSON:` telemetry against live `SECPOLEV_POLICY_ID` provenance, computes `EvidenceCompleteness`, and renders SARIF 2.1.0 (`docs/ci-integration.yml`), JSON, and offline HTML reports (`docs/index.html`).
 
 ---
 
@@ -69,6 +70,8 @@ Live QNX 8.0 x86_64 TCG images are built and booted via `.github/workflows/qemu-
 - **`secpolgenerate -N -u` capture scope:** `qnx_demo/secpolgen_capture.ifs` is a dev-time capture on a minimal custom IFS (`slogger2`, `pipe`, `can_server`) where `random` exits under QEMU TCG without hardware RNG.
 - **`dropped=0` scope:** `dropped=0` is only meaningful in independent verification boots without `secpolgenerate` active.
 - **`/dev/secpol_sentry` snapshot semantics:** `/dev/secpol_sentry` provides a per-client frozen snapshot with independent OCB read offsets, not a continuous live event stream.
+- **Policy reachability vs. exploitability:** Static and probed blast-radius edges prove worst-case post-compromise **policy-permitted reachability** (what the QNX microkernel allows a compromised type to do), not that a specific application binary contains a remote exploit.
+- **`libsecpolev` single-consumer constraint:** Per QNX 8.0 architecture, `libsecpolev` consumes system trace events exclusively and cannot run simultaneously with `tracelogger` / System Profiler unless `secpolgenerate` is forwarding events.
 
 ---
 
@@ -81,4 +84,6 @@ Live QNX 8.0 x86_64 TCG images are built and booted via `.github/workflows/qemu-
 | **Process-level transition evidence** | `evidence/qemu_logs/M3_sentry_escalate.log` (329 events: 327 OK, 2 DENIED, 0 dropped); `evidence/qemu_logs/M0_sentry_clean.log` (281 events: 278 OK, 3 DENIED, 0 dropped) |
 | **Resource-manager security enforcement** | `qnx_demo/kprobe.c` (`secpol_resmgr_attach()`), `evidence/blast/M0_blast_completeness.json`, `evidence/blast/M3_blast_completeness.json` (12/12 1-to-1 PID correlated, 1 `ALLOW`, 2 `EACCES`, 0 `EEXIST`, 0 mismatches, `COMPLETE`) |
 | **Remediation** | `qnx_demo/mutants/M3_sentry_escalate.secpol` vs. `qnx_demo/mutants/M0_sentry_clean.secpol` + raw QEMU logs |
+| **12-type ADAS security policy model & channel-type override** | `qnx_demo/mutants/ADAS_12svc_blast.secpol` vs. `ADAS_12svc_fixed_blast.secpol`, `evidence/adas_blast/` (16/16 `COMPLETE`, `can_chan_t` override, `kernel_policy_id` `2418320052` vs. `3119197131`) |
+| **CI & Developer Adoption** | `secpol-audit generate-probes`, `docs/ci-integration.yml` (SARIF 2.1.0 GitHub Code Scanning), `tests/test_kprobe_host.c` (`gcc -Werror`) |
 | **Reproducibility** | `harness/verify_offline.py`, `harness/run_qemu.sh`, `.github/workflows/ci.yml`, `.github/workflows/qemu-sentry.yml`, `evidence/MANIFEST.json` |
