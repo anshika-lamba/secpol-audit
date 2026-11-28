@@ -27,7 +27,7 @@ qemu-mutants:
 	@mkdir -p evidence/qemu_logs
 	@for m in $(MUTANTS); do \
 		echo "=== Running QEMU x86_64 TCG for mutant $$m ==="; \
-		bash harness/run_qemu.sh qnx_demo/build/$$m.ifs evidence/qemu_logs/$$m.log 45; \
+		bash harness/run_qemu.sh qnx_demo/build/$$m.ifs evidence/qemu_logs/$$m.log 45 || exit $$?; \
 	done
 	$(PYTHON) harness/verify_offline.py
 
@@ -42,7 +42,7 @@ qemu-sentry:
 	@mkdir -p evidence/qemu_logs
 	@for m in $(SENTRY_MUTANTS); do \
 		echo "=== Running QEMU x86_64 TCG for sentry mutant $$m ==="; \
-		bash harness/run_qemu.sh --require-post-marker "SECPOLEV_STATS:" qnx_demo/build/$$m.ifs evidence/qemu_logs/$$m.log 60; \
+		bash harness/run_qemu.sh --require-post-marker "SECPOLEV_STATS:" qnx_demo/build/$$m.ifs evidence/qemu_logs/$$m.log 60 || exit $$?; \
 	done
 
 blast-binaries:
@@ -56,7 +56,7 @@ qemu-blast:
 	@mkdir -p qnx_demo/build/blast
 	@for m in $(BLAST_MUTANTS); do \
 		echo "=== Running QEMU x86_64 TCG for blast verification $$m ==="; \
-		bash harness/run_qemu.sh --require-post-marker "SECPOLEV_STATS:" qnx_demo/build/$$m.ifs qnx_demo/build/blast/$$m.log 60; \
+		bash harness/run_qemu.sh --require-post-marker "SECPOLEV_STATS:" qnx_demo/build/$$m.ifs qnx_demo/build/blast/$$m.log 60 || exit $$?; \
 	done
 
 secpolgen-image:

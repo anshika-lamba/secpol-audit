@@ -151,3 +151,44 @@ def test_neg_10_post_marker_before_done_fails(tmp_path: Path) -> None:
         extra_args=["--require-post-marker", "SECPOLEV_STATS:"],
     )
     assert res.returncode == 1
+
+
+# Negative 11: natural QEMU exit 124 after valid marker & stats -> MUST fail (not a timeout)
+def test_neg_11_natural_qemu_exit_124_after_valid_stats_fails(tmp_path: Path) -> None:
+    res, _ = _run_fake_qemu(
+        tmp_path,
+        qemu_script='printf "=== SECPOL_AUDIT_DONE ===\\r\\nSECPOLEV_STATS: ok=5 denied=0 dropped=0\\r\\n"\nexit 124',
+        timeout_sec="5",
+        extra_args=["--require-post-marker", "SECPOLEV_STATS:"],
+    )
+    assert res.returncode == 124
+
+
+# Negative 12: incomplete or malformed SECPOLEV_STATS records -> MUST fail
+def test_neg_12_incomplete_or_malformed_secpolev_stats_fails(tmp_path: Path) -> None:
+    bad_records = [
+        "SECPOLEV_STATS:",
+        "SECPOLEV_STATS: ok=327 denied=",
+        "SECPOLEV_STATS: ok=1 denied=0",
+        "SECPOLEV_STATS: ok=abc denied=0 dropped=0",
+    ]
+    for idx, rec in enumerate(bad_records):
+        sub = tmp_path / f"case_{idx}"
+        sub.mkdir()
+        res, _ = _run_fake_qemu(
+            sub,
+            qemu_script=f'printf "=== SECPOL_AUDIT_DONE ===\\r\\n{rec}\\r\\n"\nexit 0',
+            extra_args=["--require-post-marker", "SECPOLEV_STATS:"],
+        )
+        assert res.returncode == 1, f"Expected failure for malformed stats: {rec!r}"
+
+
+def test_makefile_loops_propagate_run_qemu_failure() -> None:
+    makefile_text = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
+    run_lines = [ln for ln in makefile_text.splitlines() if "bash harness/run_qemu.sh" in ln]
+    assert len(run_lines) >= 4
+    # Every loop invocation (lines with $$m) must propagate failure via || exit $$?
+    loop_lines = [ln for ln in run_lines if "$$m" in ln]
+    assert len(loop_lines) == 3
+    for ln in loop_lines:
+        assert "|| exit $$?" in ln, f"Missing failure propagation in Makefile line: {ln}"
