@@ -5,6 +5,7 @@
 A deterministic QNX 8.0 security-policy auditor that connects static privilege-escalation analysis with native security-event telemetry and reproducible before/after verification.
 
 - **Interactive Before/After Blast Explorer (GitHub Pages):** https://anshika-lamba.github.io/secpol-audit/
+- **Hands-On QNX 8.0 Codelab:** https://anshika-lamba.github.io/secpol-audit/codelab/ (Markdown: [`codelab/README.md`](codelab/README.md))
 
 ---
 

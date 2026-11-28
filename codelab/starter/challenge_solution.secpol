@@ -1,0 +1,14 @@
+# Codelab Challenge Solution: Removed unsafe settypeid transitions
+
+type sensor_hal_t;
+type logger_helper_t;
+type web_ui_t;
+
+allow_attach sensor_hal_t /dev/sensor_hal;
+allow sensor_hal_t self:ability {
+    nonroot
+    mem_phys:0xfd000000-0xfd010000
+    pathspace
+};
+
+allow web_ui_t logger_helper_t : channel connect;
