@@ -150,3 +150,31 @@ def test_p2_4_adas_16_probe_channel_override_boot_reaches_complete() -> None:
     assert rep.completeness.probes_completed == 16
     assert rep.completeness.kernel_events_correlated == 16
     assert rep.completeness.kernel_policy_id == 7
+
+
+def test_p2_5_real_committed_adas_12svc_logs_complete_with_policy_ids() -> None:
+    ifs = parse_ifs_file(ADAS_IFS)
+    for pol_path, log_name, exp_pid in (
+        (ADAS_VULN, "ADAS_12svc_blast.log", 2418320052),
+        (ADAS_FIXED, "ADAS_12svc_fixed_blast.log", 3119197131),
+    ):
+        pol = parse_secpol_file(pol_path)
+        specs = load_expected_probes_manifest(ADAS_MANIFEST, policy=pol, ifs=ifs)
+        log_p = REPO_ROOT / "evidence" / "adas_blast" / log_name
+        rep = analyze_blast(
+            pol,
+            ifs=ifs,
+            log_text=log_p.read_text(encoding="utf-8", errors="replace"),
+            log_path=str(log_p),
+            expected_probe_specs=specs,
+            expected_policy_id=exp_pid,
+        )
+        c = rep.completeness
+        assert c.result == "COMPLETE"
+        assert c.probes_total == 16
+        assert c.probes_completed == 16
+        assert c.kernel_events_correlated == 16
+        assert c.unobservable_operations == 0
+        assert c.dropped_events == 0
+        assert c.mismatches == 0
+        assert c.kernel_policy_id == exp_pid

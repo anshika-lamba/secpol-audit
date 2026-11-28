@@ -1,0 +1,15 @@
+{
+  "target": "QNX Neutrino 8.0 \u00b7 QEMU x86_64 TCG",
+  "execution": "independent-verification-boot",
+  "policy_path": "qnx_demo/mutants/ADAS_12svc_fixed_blast.secpol",
+  "policy_hash": "690c27ae01832a9664a60d2f8ae41cac0171ecbe62fa01b78dc4566b670895a8",
+  "log_path": "qnx_demo/build/adas_blast/ADAS_12svc_fixed_blast.log",
+  "probes_total": 16,
+  "probes_completed": 16,
+  "kernel_events_correlated": 16,
+  "unobservable_operations": 0,
+  "dropped_events": 0,
+  "mismatches": 0,
+  "result": "COMPLETE",
+  "kernel_policy_id": 3119197131
+}
