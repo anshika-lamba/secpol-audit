@@ -166,21 +166,26 @@ static void probe_channel_connect(const char *origin, const char *name_spec) {
     const char *name = name_spec;
     uint32_t target_id = SECPOL_INVALID_TYPE;
 
-    if (name_spec != NULL) {
-        const char *eq = strchr(name_spec, '=');
-        if (eq != NULL) {
-            size_t nlen = (size_t)(eq - name_spec);
-            if (nlen >= sizeof(name_buf)) {
-                nlen = sizeof(name_buf) - 1;
-            }
-            memcpy(name_buf, name_spec, nlen);
-            name_buf[nlen] = '\0';
-            name = name_buf;
-            const char *server_type = eq + 1;
-            if (server_type[0] != '\0') {
-                target_id = secpol_get_type_id(NULL, server_type);
-            }
+    if (name_spec == NULL || name_spec[0] == '\0') {
+        emit_kprobe_json(origin, "channel_connect", "", "", SECPOL_INVALID_TYPE, -1, 0, EINVAL);
+        return;
+    }
+
+    const char *eq = strchr(name_spec, '=');
+    if (eq != NULL) {
+        size_t nlen = (size_t)(eq - name_spec);
+        const char *server_type = eq + 1;
+        if (nlen == 0 || server_type[0] == '\0' || strchr(server_type, '=') != NULL || nlen >= sizeof(name_buf)) {
+            emit_kprobe_json(origin, "channel_connect", name_spec, "", SECPOL_INVALID_TYPE, -1, 0, EINVAL);
+            return;
         }
+        memcpy(name_buf, name_spec, nlen);
+        name_buf[nlen] = '\0';
+        name = name_buf;
+        target_id = secpol_get_type_id(NULL, server_type);
+    } else if (strlen(name_spec) >= sizeof(name_buf)) {
+        emit_kprobe_json(origin, "channel_connect", name_spec, "", SECPOL_INVALID_TYPE, -1, 0, EINVAL);
+        return;
     }
 
     errno = 0;

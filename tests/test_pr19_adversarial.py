@@ -621,3 +621,86 @@ def test_cei6_correlated_channel_connect_associated_with_review_edge(tmp_path: P
     assert len(rev_receipts) == 1
     assert rev_receipts[0].evidence_state == STATE_OBSERVED_AND_CORRELATED
     assert rev_receipts[0].syscall_outcome == "ALLOW"
+
+
+# ---------------------------------------------------------------------------
+# Final evidence contract & channel attribution audit tests
+# ---------------------------------------------------------------------------
+
+def test_eca1_rejects_generic_evidence_requirement(tmp_path: Path) -> None:
+    import json
+    import pytest
+    from secpol_audit.blast import load_expected_probes_manifest
+    from secpol_audit.ir import ParseDiagnostic
+    base = json.loads((Path(__file__).resolve().parent.parent / "qnx_demo" / "blast_expected_probes.json").read_text(encoding="utf-8"))
+
+    bad1 = json.loads(json.dumps(base))
+    bad1["probes"][0]["evidence_requirement"] = "ALLOW"
+    p1 = tmp_path / "bad_req1.json"
+    p1.write_text(json.dumps(bad1), encoding="utf-8")
+    with pytest.raises(ParseDiagnostic):
+        load_expected_probes_manifest(p1)
+
+    bad2 = json.loads(json.dumps(base))
+    bad2["probes"][3]["evidence_requirement"] = "pid+attach_path"
+    p2 = tmp_path / "bad_req2.json"
+    p2.write_text(json.dumps(bad2), encoding="utf-8")
+    with pytest.raises(ParseDiagnostic):
+        load_expected_probes_manifest(p2)
+
+
+def test_eca2_rejects_wrong_resolved_target_type_for_settypeid_and_allow_attach(tmp_path: Path) -> None:
+    import json
+    import pytest
+    from secpol_audit.blast import load_expected_probes_manifest
+    from secpol_audit.ir import ParseDiagnostic
+    base = json.loads((Path(__file__).resolve().parent.parent / "qnx_demo" / "blast_expected_probes.json").read_text(encoding="utf-8"))
+
+    bad1 = json.loads(json.dumps(base))
+    bad1["probes"][0]["resolved_target_type"] = "can_hal_t"
+    p1 = tmp_path / "bad_rt1.json"
+    p1.write_text(json.dumps(bad1), encoding="utf-8")
+    with pytest.raises(ParseDiagnostic):
+        load_expected_probes_manifest(p1)
+
+    bad2 = json.loads(json.dumps(base))
+    bad2["probes"][3]["resolved_target_type"] = "ivi_ui_t"
+    p2 = tmp_path / "bad_rt2.json"
+    p2.write_text(json.dumps(bad2), encoding="utf-8")
+    with pytest.raises(ParseDiagnostic):
+        load_expected_probes_manifest(p2)
+
+
+def test_eca3_rejects_unmapped_channel_in_manifest(tmp_path: Path) -> None:
+    import json
+    import pytest
+    from secpol_audit.blast import load_expected_probes_manifest
+    from secpol_audit.ir import ParseDiagnostic
+    pol = parse_secpol_file(M3_BLAST_SECPOL)
+    base = json.loads((Path(__file__).resolve().parent.parent / "qnx_demo" / "blast_expected_probes.json").read_text(encoding="utf-8"))
+    bad = json.loads(json.dumps(base))
+    bad["probes"][2]["target"] = "nonexistent_chan"
+    p = tmp_path / "bad_ch.json"
+    p.write_text(json.dumps(bad), encoding="utf-8")
+    with pytest.raises(ParseDiagnostic):
+        load_expected_probes_manifest(p, policy=pol)
+
+
+def test_eca4_ifs_cross_check_accepts_valid_and_rejects_mismatched_ifs(tmp_path: Path) -> None:
+    import pytest
+    from secpol_audit.blast import load_expected_probes_manifest
+    from secpol_audit.ir import ParseDiagnostic
+    pol = parse_secpol_file(M3_BLAST_SECPOL)
+    ifs = parse_ifs_file(BLAST_IFS)
+    manifest_p = Path(__file__).resolve().parent.parent / "qnx_demo" / "blast_expected_probes.json"
+    specs = load_expected_probes_manifest(manifest_p, policy=pol, ifs=ifs)
+    assert len(specs) == 12
+
+    bad_ifs_p = tmp_path / "bad.ifs.in"
+    bad_ifs_p.write_text(
+        BLAST_IFS.read_text(encoding="utf-8").replace("--connect can_ctrl=can_hal_t", "--connect can_ctrl=diag_helper_t"),
+        encoding="utf-8",
+    )
+    bad_ifs = parse_ifs_file(bad_ifs_p)
+    with pytest.raises(ParseDiagnostic):
+        load_expected_probes_manifest(manifest_p, policy=pol, ifs=bad_ifs)

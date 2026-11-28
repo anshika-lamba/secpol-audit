@@ -428,6 +428,7 @@ def load_expected_probes_manifest(
     path: Path | str,
     *,
     policy: PolicyIR | None = None,
+    ifs: IfsIR | None = None,
 ) -> tuple[tuple[str, str, str], ...]:
     """Load and strictly validate a JSON expected-probe manifest."""
     path = Path(path)
@@ -449,6 +450,13 @@ def load_expected_probes_manifest(
         "default_spawn_type": "type",
         "channel_connect": "channel",
         "allow_attach": "path",
+    }
+    op_to_req = {
+        "settypeid": "pid+ability_range",
+        "derive_type": "pid+ability_range",
+        "default_spawn_type": "pid+ability_range",
+        "channel_connect": "pid+server_type_range",
+        "allow_attach": "pid+exact_path",
     }
 
     seen_ids: set[str] = set()
@@ -474,10 +482,22 @@ def load_expected_probes_manifest(
             raise ParseDiagnostic("PARSE_ERROR", f"Manifest probe[{idx}] unsupported op '{op}'", span)
         if tkind not in VALID_TARGET_KINDS or tkind != op_to_kind[op]:
             raise ParseDiagnostic("PARSE_ERROR", f"Manifest probe[{idx}] invalid target_kind '{tkind}' for op '{op}'", span)
-        if req not in ("pid+ability_range", "pid+server_type_range", "pid+attach_path", "pid+exact_path", "ALLOW", "DENY", "ALLOW_OR_DENY"):
-            raise ParseDiagnostic("PARSE_ERROR", f"Manifest probe[{idx}] invalid evidence_requirement '{req}'", span)
+        if req != op_to_req[op]:
+            raise ParseDiagnostic(
+                "PARSE_ERROR",
+                f"Manifest probe[{idx}] invalid evidence_requirement '{req}' for op '{op}' (expected '{op_to_req[op]}')",
+                span,
+            )
+        if op in ("settypeid", "derive_type", "default_spawn_type") and resolved_t != target:
+            raise ParseDiagnostic(
+                "PARSE_ERROR",
+                f"Manifest probe[{idx}] resolved_target_type '{resolved_t}' must equal target '{target}'",
+                span,
+            )
         if op == "channel_connect" and (not isinstance(resolved_t, str) or not resolved_t.strip()):
             raise ParseDiagnostic("PARSE_ERROR", f"Manifest probe[{idx}] missing 'resolved_target_type' for channel_connect", span)
+        if op == "allow_attach" and resolved_t is not None:
+            raise ParseDiagnostic("PARSE_ERROR", f"Manifest probe[{idx}] resolved_target_type must be null for allow_attach", span)
         if policy is not None:
             if origin not in policy.types:
                 raise ParseDiagnostic("PARSE_ERROR", f"Manifest probe[{idx}] unknown origin type '{origin}'", span)
@@ -489,12 +509,33 @@ def load_expected_probes_manifest(
                     for _ft, ap_path, _raw, ct in alist:
                         if _name_matches_path(target, ap_path):
                             eff_types.add(ct if ct else tname)
-                if eff_types and eff_types != {resolved_t}:
+                if len(eff_types) != 1 or eff_types != {resolved_t}:
                     raise ParseDiagnostic(
                         "PARSE_ERROR",
-                        f"Manifest probe[{idx}] resolved_target_type '{resolved_t}' disagrees with policy channel types {sorted(eff_types)}",
+                        f"Manifest probe[{idx}] resolved_target_type '{resolved_t}' must match unique policy channel type (found {sorted(eff_types)})",
                         span,
                     )
+        if ifs is not None and op == "channel_connect":
+            if not any(f"-T {resolved_t}" in cmd.raw for cmd in ifs.commands):
+                raise ParseDiagnostic(
+                    "PARSE_ERROR",
+                    f"Manifest probe[{idx}] resolved_target_type '{resolved_t}' is not launched in IFS",
+                    span,
+                )
+            for cmd in ifs.commands:
+                if "--connect" in cmd.raw:
+                    parts = cmd.raw.split()
+                    for i_p, tok in enumerate(parts):
+                        if tok == "--connect" and i_p + 1 < len(parts):
+                            for spec in parts[i_p + 1].split(","):
+                                if "=" in spec:
+                                    ch_name, srv_t = spec.split("=", 1)
+                                    if ch_name == target and srv_t != resolved_t:
+                                        raise ParseDiagnostic(
+                                            "PARSE_ERROR",
+                                            f"Manifest probe[{idx}] resolved_target_type '{resolved_t}' disagrees with IFS --connect '{spec}'",
+                                            span,
+                                        )
         tup = (origin, op, target)
         if tup in seen_tuples:
             raise ParseDiagnostic("PARSE_ERROR", f"Duplicate manifest probe tuple {tup}", span)
