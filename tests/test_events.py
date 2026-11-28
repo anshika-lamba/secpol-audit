@@ -248,7 +248,8 @@ def test_real_qnx8_m3_sentry_escalate_log_confirms_2hop_chain(capsys, tmp_path: 
     res = correlate_events(parsed, pol, ifs=ifs)
 
     assert len(parsed.events) == 329
-    assert len(parsed.alerts) == 1
+    assert len(parsed.alerts) == 0
+    assert len(parsed.lineage_hops) == 2
     assert parsed.stats.dropped == 0
 def test_pid_parsing_in_secpolev_json_and_no_fallback_heuristics() -> None:
     log_text = (

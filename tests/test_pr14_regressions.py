@@ -176,3 +176,26 @@ def test_blast_one_to_one_pid_witness_rejects_duplicate_reuse() -> None:
     rep_dup = analyze_blast(pol, log_text=dup_log, log_path="<pid-dup>")
     assert rep_dup.completeness.kernel_events_correlated == 1
     assert rep_dup.completeness.unobservable_operations == 1
+
+
+def test_docs_index_html_offline_and_evidence_manifest_integrity() -> None:
+    import hashlib
+    import json
+
+    docs_html = REPO_ROOT / "docs" / "index.html"
+    assert docs_html.is_file(), "docs/index.html must exist"
+    html_text = docs_html.read_text(encoding="utf-8")
+    assert "http://" not in html_text
+    assert "https://" not in html_text
+    assert 'data-has-diff="true"' in html_text
+
+    manifest_path = REPO_ROOT / "evidence" / "MANIFEST.json"
+    assert manifest_path.is_file(), "evidence/MANIFEST.json must exist"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    logs = manifest["evidence_logs_sha256"]
+    assert len(logs) > 0
+    for rel, expected_sha in logs.items():
+        p = REPO_ROOT / "evidence" / rel
+        assert p.is_file(), f"Missing evidence log: {p}"
+        actual_sha = hashlib.sha256(p.read_bytes()).hexdigest()
+        assert actual_sha == expected_sha, f"SHA-256 mismatch for {rel}"
