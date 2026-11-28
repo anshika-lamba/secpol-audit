@@ -63,8 +63,10 @@ def _make_12_probe_log(
             pid = 1000  # same PID as idx 0
             out, err = "ALLOW", 0  # same verdict, different target
         k_pid_part = "" if missing_kprobe_pid_idx == idx else f',"pid":{pid}'
+        tid_val = 2 if target == "can_hal_t" else (4 if target == "diag_helper_t" else (5 if target == "ivi_ui_t" else 2))
+        tid_part = f',"target_id":{tid_val}' if op in ("settypeid", "channel_connect") else ""
         lines.append(
-            f'KPROBE_JSON:{{"origin":"{origin}","op":"{op}","target":"{target}"{k_pid_part},"ret":{0 if out=="ALLOW" else -1},"outcome":"{out}","errno":{err}}}'
+            f'KPROBE_JSON:{{"origin":"{origin}","op":"{op}","target":"{target}"{k_pid_part}{tid_part},"ret":{0 if out=="ALLOW" else -1},"outcome":"{out}","errno":{err}}}'
         )
         if duplicate_first_probe and idx == 0:
             lines.append(
@@ -83,11 +85,11 @@ def _make_12_probe_log(
         verdict = "OK" if out == "ALLOW" else "DENIED"
         if op == "settypeid":
             lines.append(
-                f'SECPOLEV_JSON:{{"ts_ns":{1000+idx}{ev_pid_part},"verdict":"{verdict}","proc":"kprobe","type":"{origin}","kind":"ability","ability":"settypeid","root":false}}'
+                f'SECPOLEV_JSON:{{"ts_ns":{1000+idx}{ev_pid_part},"verdict":"{verdict}","proc":"kprobe","type":"{origin}","kind":"ability","ability":"settypeid","root":false,"range":[{tid_val},{tid_val}]}}'
             )
         elif op == "channel_connect":
             lines.append(
-                f'SECPOLEV_JSON:{{"ts_ns":{1000+idx}{ev_pid_part},"verdict":"{verdict}","proc":"kprobe","type":"{origin}","kind":"ability","ability":"channel_connect","root":false}}'
+                f'SECPOLEV_JSON:{{"ts_ns":{1000+idx}{ev_pid_part},"verdict":"{verdict}","proc":"kprobe","type":"{origin}","kind":"ability","ability":"channel_connect","root":false,"range":[2,2]}}'
             )
         elif op == "allow_attach":
             ev_path = "/dev/wrong_path" if (wrong_allow_attach_path and idx == 11) else target
@@ -100,6 +102,7 @@ def _make_12_probe_log(
             'KPROBE_JSON:{"origin":"ivi_ui_t","op":"settypeid","target":"slogger2_t","pid":5555,"ret":-1,"outcome":"DENY","errno":1}'
         )
     if not drop_stats:
+        lines.append("=== SECPOL_AUDIT_DONE ===")
         lines.append(f"SECPOLEV_STATS: ok=12 denied=0 dropped={dropped}")
     return "\n".join(lines) + "\n"
 
@@ -135,7 +138,9 @@ def test_4_reused_secpolev_event_rejected() -> None:
 
 def test_5_same_pid_two_settypeid_different_targets_ambiguous() -> None:
     pol = parse_secpol_file(M3_BLAST_SECPOL)
-    rep = analyze_blast(pol, log_text=_make_12_probe_log(same_pid_two_settypeid=True))
+    # Without target_id disambiguation, two settypeid probes in the same PID are ambiguous
+    log_no_tid = _make_12_probe_log(same_pid_two_settypeid=True).replace('"target_id":4,', '"target_id":null,').replace('"target_id":5,', '"target_id":null,')
+    rep = analyze_blast(pol, log_text=log_no_tid)
     assert rep.completeness.result != "COMPLETE"
     assert rep.completeness.unobservable_operations >= 2
 
@@ -229,3 +234,148 @@ def test_real_committed_m0_and_m3_blast_logs_still_complete() -> None:
     assert m0.completeness.result == "PARTIAL"
     assert m0.completeness.mismatches == 0
     assert m0.completeness.dropped_events == 0
+
+
+# ---------------------------------------------------------------------------
+# Corrective-pass adversarial tests (14 new tests)
+# ---------------------------------------------------------------------------
+
+def test_cp1_settypeid_missing_target_id_is_unobservable() -> None:
+    pol = parse_secpol_file(M3_BLAST_SECPOL)
+    log = _make_12_probe_log().replace('"target_id":4,', '"target_id":null,', 1)
+    rep = analyze_blast(pol, log_text=log)
+    assert rep.completeness.result != "COMPLETE"
+    assert rep.completeness.unobservable_operations >= 1
+
+
+def test_cp2_settypeid_incompatible_range_is_unobservable() -> None:
+    pol = parse_secpol_file(M3_BLAST_SECPOL)
+    log = _make_12_probe_log().replace('"range":[4,4]', '"range":[99,99]', 1)
+    rep = analyze_blast(pol, log_text=log)
+    assert rep.completeness.result != "COMPLETE"
+    assert rep.completeness.unobservable_operations >= 1
+
+
+def test_cp3_channel_connect_unmapped_target_is_unobservable() -> None:
+    pol = parse_secpol_file(M3_BLAST_SECPOL)
+    log = _make_12_probe_log().replace('"target":"can_ctrl"', '"target":"unknown_chan"', 1)
+    rep = analyze_blast(pol, log_text=log)
+    assert rep.completeness.result != "COMPLETE"
+    assert rep.completeness.unobservable_operations >= 1
+
+
+def test_cp4_manifest_loader_validates_12_probes() -> None:
+    from secpol_audit.blast import load_expected_probes_manifest
+    specs = load_expected_probes_manifest(
+        Path(__file__).resolve().parent.parent / "qnx_demo" / "blast_expected_probes.json"
+    )
+    assert len(specs) == 12
+
+
+def test_cp5_manifest_loader_rejects_duplicate_ids(tmp_path: Path) -> None:
+    import json
+    import pytest
+    from secpol_audit.blast import load_expected_probes_manifest
+    from secpol_audit.ir import ParseDiagnostic
+    p = tmp_path / "bad_manifest.json"
+    p.write_text(json.dumps({
+        "schema_version": 1,
+        "probes": [
+            {"id": "p1", "origin": "ivi_ui_t", "op": "settypeid", "target": "diag_helper_t", "target_kind": "type", "resolved_target_type": "diag_helper_t", "evidence_requirement": "ALLOW"},
+            {"id": "p1", "origin": "ivi_ui_t", "op": "settypeid", "target": "can_hal_t", "target_kind": "type", "resolved_target_type": "can_hal_t", "evidence_requirement": "DENY"},
+        ]
+    }), encoding="utf-8")
+    with pytest.raises(ParseDiagnostic):
+        load_expected_probes_manifest(p)
+
+
+def test_cp6_scoped_origin_without_manifest_never_complete() -> None:
+    pol = parse_secpol_file(M3_BLAST_SECPOL)
+    rep = analyze_blast(pol, log_text=_make_12_probe_log(), origin_filter="ivi_ui_t")
+    assert rep.completeness.result != "COMPLETE"
+
+
+def test_cp7_count_only_expected_probes_never_complete() -> None:
+    pol = parse_secpol_file(M3_BLAST_SECPOL)
+    rep = analyze_blast(pol, log_text=_make_12_probe_log(), expected_probes=12, expected_probe_specs=())
+    assert rep.completeness.result != "COMPLETE"
+
+
+def test_cp8_missing_done_marker_never_complete() -> None:
+    pol = parse_secpol_file(M3_BLAST_SECPOL)
+    log = _make_12_probe_log().replace("=== SECPOL_AUDIT_DONE ===\n", "")
+    rep = analyze_blast(pol, log_text=log)
+    assert rep.completeness.result != "COMPLETE"
+
+
+def test_cp9_pre_marker_stats_only_never_complete() -> None:
+    pol = parse_secpol_file(M3_BLAST_SECPOL)
+    log = _make_12_probe_log().replace(
+        "=== SECPOL_AUDIT_DONE ===\nSECPOLEV_STATS: ok=12 denied=0 dropped=0\n",
+        "SECPOLEV_STATS: ok=12 denied=0 dropped=0\n=== SECPOL_AUDIT_DONE ===\n",
+    )
+    rep = analyze_blast(pol, log_text=log)
+    assert rep.completeness.result != "COMPLETE"
+
+
+def test_cp10_kprobe_pid_zero_is_unobservable() -> None:
+    pol = parse_secpol_file(M3_BLAST_SECPOL)
+    log = _make_12_probe_log().replace('"pid":1001', '"pid":0', 1)
+    rep = analyze_blast(pol, log_text=log)
+    assert rep.completeness.result != "COMPLETE"
+    assert rep.completeness.unobservable_operations >= 1
+
+
+def test_cp11_secpolev_pid_zero_is_unobservable() -> None:
+    pol = parse_secpol_file(M3_BLAST_SECPOL)
+    log = _make_12_probe_log().replace('"pid":1001', '"pid":0', 2)
+    # Second replacement hits SECPOLEV_JSON if first was KPROBE_JSON; ensure SECPOLEV_JSON has pid 0
+    lines = _make_12_probe_log().splitlines()
+    for i, ln in enumerate(lines):
+        if ln.startswith("SECPOLEV_JSON:") and '"pid":1001' in ln:
+            lines[i] = ln.replace('"pid":1001', '"pid":0')
+            break
+    rep = analyze_blast(pol, log_text="\n".join(lines) + "\n")
+    assert rep.completeness.result != "COMPLETE"
+    assert rep.completeness.unobservable_operations >= 1
+
+
+def test_cp12_duplicate_probe_preserved_in_receipts() -> None:
+    pol = parse_secpol_file(M3_BLAST_SECPOL)
+    base_log = _make_12_probe_log()
+    dup_line = (
+        'KPROBE_JSON:{"origin":"ivi_ui_t","op":"settypeid","target":"diag_helper_t","pid":1099,"target_id":4,"ret":0,"outcome":"ALLOW","errno":0}\n'
+        'SECPOLEV_JSON:{"ts_ns":1099,"pid":1099,"verdict":"OK","proc":"kprobe","type":"ivi_ui_t","kind":"ability","ability":"settypeid","root":false,"range":[4,4]}\n'
+    )
+    rep = analyze_blast(pol, log_text=dup_line + base_log)
+    assert rep.completeness.result != "COMPLETE"
+    dup_receipts = [
+        r for r in rep.all_receipts
+        if r.origin == "ivi_ui_t" and r.op == "settypeid" and r.target == "diag_helper_t" and r.syscall_outcome is not None
+    ]
+    assert len(dup_receipts) == 2
+
+
+def test_cp13_cli_expected_probes_file_flag(tmp_path: Path) -> None:
+    from secpol_audit.cli import main
+    log_p = tmp_path / "blast.log"
+    log_p.write_text(_make_12_probe_log(), encoding="utf-8")
+    out_p = tmp_path / "comp.json"
+    manifest_p = Path(__file__).resolve().parent.parent / "qnx_demo" / "blast_expected_probes.json"
+    rc = main([
+        "blast", str(M3_BLAST_SECPOL),
+        "--log", str(log_p),
+        "--expected-probes-file", str(manifest_p),
+        "--completeness-out", str(out_p),
+        "--format", "json",
+    ])
+    assert rc in (0, 1)
+    import json
+    comp = json.loads(out_p.read_text(encoding="utf-8"))
+    assert comp["result"] == "COMPLETE"
+
+
+def test_cp14_kprobe_c_emits_target_id() -> None:
+    kprobe_c = (Path(__file__).resolve().parent.parent / "qnx_demo" / "kprobe.c").read_text(encoding="utf-8")
+    assert "secpol_get_type_id" in kprobe_c
+    assert "target_id" in kprobe_c
